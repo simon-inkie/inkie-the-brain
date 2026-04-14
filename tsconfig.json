@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": true
+  },
+  "include": [
+    "core/**/*.ts",
+    "adapters/**/*.ts",
+    "mcp/**/*.ts",
+    "daemon/**/*.ts",
+    "cli/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".debugging"]
+}
