@@ -1,0 +1,11 @@
+{
+  "name": "greymatter-openclaw-plugin",
+  "version": "0.2.0",
+  "private": true,
+  "description": "OpenClaw context-engine plugin — thin adapter over greymatter/core/context-engine.",
+  "type": "module",
+  "main": "src/index.ts",
+  "openclaw": {
+    "extensions": ["./src/index.ts"]
+  }
+}

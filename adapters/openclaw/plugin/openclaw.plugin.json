@@ -1,0 +1,54 @@
+{
+  "id": "greymatter",
+  "name": "Greymatter",
+  "kind": "context-engine",
+  "version": "0.2.0",
+  "description": "Context engine plugin — bounds per-turn message history via intelligent slicing. Fixes unbounded contents growth in long-running sessions.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "recentTurnCount": {
+        "type": "number",
+        "default": 20,
+        "description": "How many most-recent messages to keep verbatim per turn."
+      },
+      "preserveFirstUserMessage": {
+        "type": "boolean",
+        "default": true,
+        "description": "Always keep the very first user message in the sliced output."
+      },
+      "minRawFloor": {
+        "type": "number",
+        "default": 4,
+        "description": "Never prune below this many messages even if recentTurnCount is larger than available."
+      },
+      "maxInjectedChars": {
+        "type": "number",
+        "default": 40000,
+        "description": "Soft cap on systemPromptAddition chars. Newest content kept on overflow."
+      },
+      "memoryBlockSource": {
+        "type": "string",
+        "enum": ["memory-core", "file", "none"],
+        "default": "memory-core",
+        "description": "How to source the injected memory block. 'memory-core': rely on OpenClaw's memory-core to inject MEMORY.md (default, safest). 'file': read MEMORY.md IO_LIVE section directly. 'none': no injection."
+      },
+      "memoryRoot": {
+        "type": "string",
+        "default": "${workspace}/memory",
+        "description": "Path to memory root dir (used only when memoryBlockSource=file)."
+      },
+      "memoryFile": {
+        "type": "string",
+        "default": "${workspace}/MEMORY.md",
+        "description": "Path to MEMORY.md (used only when memoryBlockSource=file)."
+      },
+      "debug": {
+        "type": "boolean",
+        "default": false,
+        "description": "Emit per-turn debug log line with stats."
+      }
+    }
+  }
+}

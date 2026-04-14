@@ -1,0 +1,14 @@
+{
+  "name": "greymatter-openclaw-hooks",
+  "version": "0.2.0",
+  "private": true,
+  "description": "OpenClaw hook pack — io-observer, io-message-indexer, io-media-filer. Thin wrappers over greymatter/core.",
+  "type": "module",
+  "openclaw": {
+    "hooks": [
+      "./hooks/io-observer",
+      "./hooks/io-message-indexer",
+      "./hooks/io-media-filer"
+    ]
+  }
+}
