@@ -16,9 +16,13 @@ const execFileAsync = promisify(execFile);
  * assembly and MEMORY.md splicing.
  */
 
-const BUILD_CONTEXT_SH = join(
-  process.env.HOME!,
-  ".openclaw/workspace/memory/tools/build-context.sh",
+import { fileURLToPath } from "node:url";
+
+const BUILD_CONTEXT_SH = fileURLToPath(
+  new URL(
+    "../../adapters/openclaw/hooks/memory-tools/build-context.sh",
+    import.meta.url,
+  ),
 );
 
 let testDir: string;

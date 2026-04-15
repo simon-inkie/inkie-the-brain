@@ -13,6 +13,7 @@ import {
 import { execFile } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
+import { fileURLToPath } from "url";
 
 // --- Config ---
 
@@ -36,8 +37,16 @@ const SESSIONS_DIR = join(
   "main",
   "sessions",
 );
-const OBSERVE_SH = join(WORKSPACE, "memory", "tools", "observe.sh");
-const REFLECT_SH = join(WORKSPACE, "memory", "tools", "reflect.sh");
+
+// Resolve bundled shell scripts relative to this handler's install location.
+// At install time openclaw copies the hook pack dir (adapters/openclaw/hooks/)
+// to ~/.openclaw/hooks/<pack>/, so memory-tools/ travels with it.
+// Env override GREYMATTER_TOOLS_DIR lets development/CI point elsewhere.
+const TOOLS_DIR =
+  process.env.GREYMATTER_TOOLS_DIR ??
+  fileURLToPath(new URL("../../memory-tools/", import.meta.url));
+const OBSERVE_SH = join(TOOLS_DIR, "observe.sh");
+const REFLECT_SH = join(TOOLS_DIR, "reflect.sh");
 
 export const MIN_OBSERVATION_GAP_MS = 25 * 60 * 1000; // 25 minutes
 export const DEFAULT_OBSERVATION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
