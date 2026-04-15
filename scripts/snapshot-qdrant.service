@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
+Documentation=file:///home/simon/io-projects/greymatter/README.md
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/simon/io-projects/greymatter/scripts/snapshot-qdrant.sh
+# Redirect output to journal — view with `journalctl --user -u snapshot-qdrant`
+StandardOutput=journal
+StandardError=journal
+# Guard against runaway jobs
+TimeoutStartSec=600
+# Don't restart — if it fails, the timer will run it again next cycle
+Restart=no

@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
+Documentation=file:///home/simon/io-projects/greymatter/README.md
+
+[Timer]
+# Run every day at 03:00 local time
+OnCalendar=*-*-* 03:00:00
+# If we miss a run (laptop sleeping etc.), catch up on next boot
+Persistent=true
+# Jitter to avoid thundering herd if multiple timers fire at once
+RandomizedDelaySec=300
+Unit=snapshot-qdrant.service
+
+[Install]
+WantedBy=timers.target
