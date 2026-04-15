@@ -10,7 +10,7 @@
     "declaration": true,
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
-    "allowImportingTsExtensions": false,
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": [

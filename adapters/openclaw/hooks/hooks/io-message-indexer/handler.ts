@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "crypto";
 
 // Side-effect import: loads ~/io-data/.env into process.env
-import "../../../../../core/env.js";
+import "../../core/env.js";
 
-import { embedText } from "../../../../../core/embedder/text.js";
-import { client, ensureCollections } from "../../../../../core/qdrant/client.js";
-import { config } from "../../../../../core/config.js";
-import { extractTextContent } from "../../../../../core/indexer/messages.js";
+import { embedText } from "../../core/embedder/text.js";
+import { client, ensureCollections } from "../../core/qdrant/client.js";
+import { config } from "../../core/config.js";
+import { extractTextContent } from "../../core/indexer/messages.js";
 
 // --- Singleton initialisation at module load ---
 

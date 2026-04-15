@@ -4,6 +4,15 @@
   "private": true,
   "description": "OpenClaw hook pack — io-observer, io-message-indexer, io-media-filer. Thin wrappers over greymatter/core.",
   "type": "module",
+  "dependencies": {
+    "@google/genai": "^1.46.0",
+    "@qdrant/js-client-rest": "^1.17.0",
+    "gray-matter": "^4.0.3",
+    "image-size": "^2.0.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.5.207",
+    "glob": "^13.0.6"
+  },
   "openclaw": {
     "hooks": [
       "./hooks/io-observer",
