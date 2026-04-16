@@ -208,6 +208,26 @@ greymatter/
 
 Additive merge over global (same pattern as io-auto-mode). Per-project can tune thresholds for busy vs idle projects.
 
+### Observer profile presets
+
+Current thresholds (`messageThreshold: 6`, `charThreshold: 500`, `minGapMs: 25min`) were tuned for Gemini/OpenClaw with cost-conscious defaults. Different users want different aggressiveness:
+
+```jsonc
+// Three preset profiles — users pick one in config, or roll their own
+"observer": {
+  "profile": "balanced",   // "lean" | "balanced" | "generous" | "custom"
+  "custom": { /* only used when profile: "custom" */ }
+}
+```
+
+| Profile | msgThreshold | charThreshold | minGapMs | Use case |
+|---|---|---|---|---|
+| `lean` | 10 | 2000 | 45min | API-key users, cost-sensitive |
+| `balanced` (default) | 6 | 500 | 25min | Current shipped defaults |
+| `generous` | 3 | 250 | 10min | Max plan / unlimited subscription |
+
+Profile just expands to explicit values at load time. `custom` lets advanced users set their own. This keeps v1 simple (one knob) while accommodating both ends of the cost spectrum.
+
 ---
 
 ## 7. Code changes needed in `core/`
@@ -262,6 +282,14 @@ Future: switch to token counting via `@anthropic-ai/tokenizer` or similar. Benef
 - Enables "we're at X% of context window, trigger early" logic
 
 Defer until after v1 ships. Current thresholds work in practice.
+
+### Revisit default thresholds post-launch
+
+Current defaults assumed cost-conscious Gemini/OpenClaw usage. With Claude Code + Max plan, the real usage pattern is way more conversation per unit time. Defaults may need to shift:
+- `balanced` profile might want `charThreshold: 1000` or higher (less frequent fires = less noise in observations)
+- `minGapMs` of 25min is fine; the bottleneck shifts to *how much* we capture per fire, not *how often*
+
+Plan: ship v1 with current `balanced` defaults, watch real observation logs for a week, tune based on data. The profile-preset mechanism makes this a config change, not a code change.
 
 ### Dynamic compaction-aware triggers
 
