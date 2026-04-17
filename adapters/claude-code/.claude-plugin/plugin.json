@@ -1,0 +1,5 @@
+{
+  "name": "greymatter",
+  "version": "0.2.0",
+  "description": "Compaction-proof long-term memory for Claude Code. Observes conversations, writes curated MEMORY.md, re-injects it on every prompt so nothing important is lost to /compact."
+}
