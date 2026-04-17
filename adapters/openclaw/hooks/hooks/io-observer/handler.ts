@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readSync,
   fstatSync,
   closeSync,
   renameSync,
@@ -14,6 +13,33 @@ import { execFile } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
+
+import {
+  SESSION_CHECK_INTERVAL,
+  MAX_OBSERVATION_MESSAGES,
+  evaluateShouldObserve,
+  readState,
+  readTranscriptFromOffset,
+  shouldSkipMessage,
+  sanitiseSessionKey,
+  loadPointer,
+  savePointer,
+  type Pointer,
+} from "../../../../../core/observer/index.js";
+
+// Re-export for tests + downstream code that previously imported from this module.
+export {
+  MIN_OBSERVATION_GAP_MS,
+  DEFAULT_OBSERVATION_MAX_AGE_MS,
+  evaluateShouldObserve,
+  shouldSkipMessage,
+  readTranscriptFromOffset,
+  sanitiseSessionKey,
+  type ObserverState,
+  type Pointer,
+  type EvaluateParams,
+  type EvaluateResult,
+} from "../../../../../core/observer/index.js";
 
 // --- Config ---
 
@@ -48,47 +74,7 @@ const TOOLS_DIR =
 const OBSERVE_SH = join(TOOLS_DIR, "observe.sh");
 const REFLECT_SH = join(TOOLS_DIR, "reflect.sh");
 
-export const MIN_OBSERVATION_GAP_MS = 25 * 60 * 1000; // 25 minutes
-export const DEFAULT_OBSERVATION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
-const MAX_OBSERVATION_MESSAGES = 50; // Cap per observation to avoid overwhelming observe.sh
-const SESSION_CHECK_INTERVAL = 10; // Check sessions.json every N messages
-
-// --- Noise filtering ---
-
-const SKIP_PATTERNS = [
-  /^HEARTBEAT_OK$/,
-  /^NO_REPLY$/,
-  /^\[cron:/,
-  /^Read HEARTBEAT\.md/,
-  /^System: \[/,
-];
-const MIN_CONTENT_LENGTH = 20;
-
-export function shouldSkipMessage(content: string): boolean {
-  if (content.length < MIN_CONTENT_LENGTH) return true;
-  for (const pattern of SKIP_PATTERNS) {
-    if (pattern.test(content)) return true;
-  }
-  return false;
-}
-
-// --- Pointer types ---
-
-export interface Pointer {
-  sessionKey: string;
-  sessionId: string;
-  transcriptPath: string;
-  lastObservedOffset: number;
-  lastObservedTimestamp: string | null;
-  messagesSinceLastObservation: number;
-  charsSinceLastObservation: number;
-}
-
-// --- Session key utilities ---
-
-export function sanitiseSessionKey(key: string): string {
-  return key.replace(/[/:]/g, "-");
-}
+// --- Session key derivation (OpenClaw-specific) ---
 
 function deriveSessionKey(
   channelId: string | undefined,
@@ -101,37 +87,7 @@ function deriveSessionKey(
   return `agent:main:${channel}:${convo}`;
 }
 
-// --- Pointer persistence ---
-
-function pointerPath(sessionKey: string): string {
-  return join(POINTERS_DIR, `${sanitiseSessionKey(sessionKey)}.json`);
-}
-
-function loadPointer(sessionKey: string): Pointer | null {
-  try {
-    const path = pointerPath(sessionKey);
-    if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, "utf-8"));
-    }
-  } catch {
-    // corrupt file — will be recreated
-  }
-  return null;
-}
-
-function savePointer(pointer: Pointer): void {
-  try {
-    mkdirSync(POINTERS_DIR, { recursive: true });
-    const path = pointerPath(pointer.sessionKey);
-    const tmp = `${path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(pointer, null, 2));
-    renameSync(tmp, path);
-  } catch (err) {
-    console.error("[io-observer] Failed to persist pointer:", err);
-  }
-}
-
-// --- Session resolution ---
+// --- Session resolution (OpenClaw sessions.json format) ---
 
 interface SessionInfo {
   sessionId: string;
@@ -156,7 +112,7 @@ function resolveSession(sessionKey: string): SessionInfo | null {
 const sessionCheckCounters = new Map<string, number>();
 
 function resolveOrCreatePointer(sessionKey: string): Pointer {
-  let pointer = loadPointer(sessionKey);
+  let pointer = loadPointer(POINTERS_DIR, sessionKey);
 
   // Check for session changes periodically
   const counter = (sessionCheckCounters.get(sessionKey) ?? 0) + 1;
@@ -195,7 +151,7 @@ function resolveOrCreatePointer(sessionKey: string): Pointer {
           messagesSinceLastObservation: 0,
           charsSinceLastObservation: 0,
         };
-        savePointer(pointer);
+        savePointer(POINTERS_DIR, pointer);
       }
     }
   }
@@ -214,218 +170,6 @@ function resolveOrCreatePointer(sessionKey: string): Pointer {
   }
 
   return pointer;
-}
-
-// --- Observer state ---
-
-export interface ObserverState {
-  lastObservationAt?: string | null;
-  observationMessageThreshold?: number;
-  observationCharThreshold?: number;
-  observationMaxAgeMs?: number;
-  reflectionTriggerThreshold?: number;
-  reflectionCharThreshold?: number;
-  unprocessedObservationCount?: number;
-  unprocessedObservationChars?: number;
-}
-
-function readState(): ObserverState {
-  try {
-    return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-// --- Threshold evaluation (pure, testable) ---
-
-export interface EvaluateParams {
-  messageCount: number;
-  charCount: number;
-  oldestUnobservedTimestamp: number | null;
-  state: ObserverState;
-  now: number;
-  observationInFlight: boolean;
-}
-
-export interface EvaluateResult {
-  shouldFire: boolean;
-  reason: string;
-}
-
-/**
- * Pure decision function: should an observation pass fire now?
- *
- * Trigger logic (OR, not AND): fire if ANY of
- *   - messageCount >= messageThreshold
- *   - charCount >= charThreshold
- *   - oldest unobserved message age >= maxAgeMs
- *
- * Blocking conditions (short-circuit, never fire):
- *   - observationInFlight
- *   - gap since last observation < MIN_OBSERVATION_GAP_MS (25 min cooldown)
- *   - no messages
- */
-export function evaluateShouldObserve(params: EvaluateParams): EvaluateResult {
-  if (params.observationInFlight) {
-    return { shouldFire: false, reason: "observation already in flight" };
-  }
-
-  const msgThreshold = params.state.observationMessageThreshold ?? 6;
-  const charThreshold = params.state.observationCharThreshold ?? 500;
-  const maxAgeMs =
-    params.state.observationMaxAgeMs ?? DEFAULT_OBSERVATION_MAX_AGE_MS;
-
-  const lastAt = params.state.lastObservationAt
-    ? new Date(params.state.lastObservationAt).getTime()
-    : 0;
-  const gap = params.now - lastAt;
-
-  if (gap < MIN_OBSERVATION_GAP_MS) {
-    const remainMin = Math.ceil((MIN_OBSERVATION_GAP_MS - gap) / 60000);
-    return {
-      shouldFire: false,
-      reason: `cooldown: ${remainMin}m until next observation allowed`,
-    };
-  }
-
-  if (params.messageCount === 0) {
-    return { shouldFire: false, reason: "no messages" };
-  }
-
-  const age =
-    params.oldestUnobservedTimestamp != null
-      ? params.now - params.oldestUnobservedTimestamp
-      : 0;
-
-  const msgPassed = params.messageCount >= msgThreshold;
-  const charPassed = params.charCount >= charThreshold;
-  const agePassed = age >= maxAgeMs;
-
-  if (msgPassed || charPassed || agePassed) {
-    const triggers: string[] = [];
-    if (msgPassed)
-      triggers.push(`msgs=${params.messageCount}/${msgThreshold}`);
-    if (charPassed)
-      triggers.push(`chars=${params.charCount}/${charThreshold}`);
-    if (agePassed) {
-      const ageMin = Math.floor(age / 60000);
-      const maxAgeMin = Math.floor(maxAgeMs / 60000);
-      triggers.push(`age=${ageMin}m/${maxAgeMin}m`);
-    }
-    return {
-      shouldFire: true,
-      reason: `triggered: ${triggers.join(" OR ")}`,
-    };
-  }
-
-  const ageMin = Math.floor(age / 60000);
-  const maxAgeMin = Math.floor(maxAgeMs / 60000);
-  return {
-    shouldFire: false,
-    reason: `below thresholds: msgs=${params.messageCount}/${msgThreshold}, chars=${params.charCount}/${charThreshold}, age=${ageMin}m/${maxAgeMin}m`,
-  };
-}
-
-// --- Transcript reading ---
-
-interface TranscriptMessage {
-  role: string;
-  content: string;
-  timestamp: string;
-}
-
-/**
- * Read unobserved messages from the transcript JSONL starting at the given
- * byte offset. Returns the messages and the new offset (EOF position).
- */
-export function readTranscriptFromOffset(
-  transcriptPath: string,
-  offset: number,
-): { messages: TranscriptMessage[]; newOffset: number } {
-  const messages: TranscriptMessage[] = [];
-
-  let fd: number;
-  try {
-    fd = openSync(transcriptPath, "r");
-  } catch {
-    return { messages, newOffset: offset };
-  }
-
-  try {
-    const fileSize = fstatSync(fd).size;
-
-    // File was truncated or rotated — reset to start
-    const readFrom = fileSize < offset ? 0 : offset;
-
-    const bufSize = fileSize - readFrom;
-    if (bufSize <= 0) {
-      closeSync(fd);
-      return { messages, newOffset: fileSize };
-    }
-
-    const buf = Buffer.alloc(bufSize);
-    readSync(fd, buf, 0, bufSize, readFrom);
-    closeSync(fd);
-
-    const lines = buf.toString("utf-8").split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-
-      if (parsed.type !== "message") continue;
-
-      const msg = parsed.message as
-        | { role?: string; content?: unknown; timestamp?: number }
-        | undefined;
-      if (!msg?.role) continue;
-
-      // Only observe user and assistant messages
-      if (msg.role !== "user" && msg.role !== "assistant") continue;
-
-      // Extract text content
-      let content: string;
-      if (typeof msg.content === "string") {
-        content = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        // Content blocks — extract text parts
-        content = (msg.content as Array<{ type?: string; text?: string }>)
-          .filter((b) => b.type === "text" && b.text)
-          .map((b) => b.text!)
-          .join("\n");
-      } else {
-        continue;
-      }
-
-      if (!content.trim() || shouldSkipMessage(content.trim())) continue;
-
-      messages.push({
-        role: msg.role,
-        content: content.trim(),
-        timestamp:
-          (parsed.timestamp as string) ??
-          new Date(msg.timestamp ?? Date.now()).toISOString(),
-      });
-    }
-
-    return { messages, newOffset: fileSize };
-  } catch (err) {
-    try {
-      closeSync(fd);
-    } catch {
-      /* already closed */
-    }
-    console.error("[io-observer] Error reading transcript:", err);
-    return { messages, newOffset: offset };
-  }
 }
 
 // --- Shell environment ---
@@ -458,7 +202,7 @@ function triggerObservation(pointer: Pointer): void {
     pointer.lastObservedOffset = newOffset;
     pointer.messagesSinceLastObservation = 0;
     pointer.charsSinceLastObservation = 0;
-    savePointer(pointer);
+    savePointer(POINTERS_DIR, pointer);
     console.error(
       `[io-observer] ${pointer.sessionKey}: no substantive messages in transcript since offset ${pointer.lastObservedOffset}`,
     );
@@ -513,7 +257,7 @@ function triggerObservation(pointer: Pointer): void {
       pointer.lastObservedTimestamp = new Date().toISOString();
       pointer.messagesSinceLastObservation = 0;
       pointer.charsSinceLastObservation = 0;
-      savePointer(pointer);
+      savePointer(POINTERS_DIR, pointer);
 
       if (stdout.trim()) {
         console.error(`[io-observer] ${stdout.trim()}`);
@@ -535,7 +279,7 @@ function triggerObservation(pointer: Pointer): void {
 // --- Reflection check ---
 
 function checkReflection(): void {
-  const state = readState();
+  const state = readState(STATE_FILE);
   const countThreshold = state.reflectionTriggerThreshold ?? 8;
   const charThreshold = state.reflectionCharThreshold ?? 25000;
   const count = state.unprocessedObservationCount ?? 0;
@@ -637,7 +381,7 @@ function migrateLegacyBuffer(): void {
         messagesSinceLastObservation: 0,
         charsSinceLastObservation: 0,
       };
-      savePointer(pointer);
+      savePointer(POINTERS_DIR, pointer);
       console.error(
         `[io-observer] Created initial pointer for agent:main:main at offset ${offset}`,
       );
@@ -701,7 +445,7 @@ export default function handler(event: Record<string, unknown>): void {
     if (!pointer.lastObservedTimestamp && pointer.messagesSinceLastObservation === 1) {
       pointer.lastObservedTimestamp = new Date().toISOString();
     }
-    savePointer(pointer);
+    savePointer(POINTERS_DIR, pointer);
 
     console.error(
       `[io-observer] ${sessionKey}: ${pointer.messagesSinceLastObservation} msgs, ${pointer.charsSinceLastObservation} chars since last observation`,
@@ -716,7 +460,7 @@ export default function handler(event: Record<string, unknown>): void {
       messageCount: pointer.messagesSinceLastObservation,
       charCount: pointer.charsSinceLastObservation,
       oldestUnobservedTimestamp: oldestTs,
-      state: readState(),
+      state: readState(STATE_FILE),
       now: Date.now(),
       observationInFlight: inFlightKeys.has(sessionKey),
     });

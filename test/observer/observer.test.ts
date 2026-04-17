@@ -7,7 +7,7 @@ import {
   MIN_OBSERVATION_GAP_MS,
   DEFAULT_OBSERVATION_MAX_AGE_MS,
   type ObserverState,
-} from "../../adapters/openclaw/hooks/hooks/io-observer/handler.js";
+} from "../../core/observer/index.js";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
