@@ -94,7 +94,16 @@ export function readTranscriptFromOffset(
         continue;
       }
 
-      if (parsed.type !== "message") continue;
+      // Accept both OpenClaw ({type:"message"}) and Claude Code
+      // ({type:"user"|"assistant"}) transcript shapes. The inner
+      // message.role is what we ultimately gate on.
+      const topType = parsed.type;
+      if (
+        topType !== "message" &&
+        topType !== "user" &&
+        topType !== "assistant"
+      )
+        continue;
 
       const msg = parsed.message as
         | { role?: string; content?: unknown; timestamp?: number }
