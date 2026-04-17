@@ -18,6 +18,12 @@ export interface ObserverState {
   observationMessageThreshold?: number;
   observationCharThreshold?: number;
   observationMaxAgeMs?: number;
+  /**
+   * Minimum gap between observations, in ms. Overrides MIN_OBSERVATION_GAP_MS
+   * default (25min) when set. Profile presets: lean=45min, balanced=25min,
+   * generous=10min.
+   */
+  observationMinGapMs?: number;
   reflectionTriggerThreshold?: number;
   reflectionCharThreshold?: number;
   unprocessedObservationCount?: number;

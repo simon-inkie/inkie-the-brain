@@ -27,14 +27,16 @@ export function evaluateShouldObserve(params: EvaluateParams): EvaluateResult {
   const charThreshold = params.state.observationCharThreshold ?? 500;
   const maxAgeMs =
     params.state.observationMaxAgeMs ?? DEFAULT_OBSERVATION_MAX_AGE_MS;
+  const minGapMs =
+    params.state.observationMinGapMs ?? MIN_OBSERVATION_GAP_MS;
 
   const lastAt = params.state.lastObservationAt
     ? new Date(params.state.lastObservationAt).getTime()
     : 0;
   const gap = params.now - lastAt;
 
-  if (gap < MIN_OBSERVATION_GAP_MS) {
-    const remainMin = Math.ceil((MIN_OBSERVATION_GAP_MS - gap) / 60000);
+  if (gap < minGapMs) {
+    const remainMin = Math.ceil((minGapMs - gap) / 60000);
     return {
       shouldFire: false,
       reason: `cooldown: ${remainMin}m until next observation allowed`,
