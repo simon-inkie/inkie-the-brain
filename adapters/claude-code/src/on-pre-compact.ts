@@ -1,11 +1,13 @@
 /**
- * greymatter — Claude Code Stop hook handler.
+ * greymatter — Claude Code PreCompact hook handler.
  *
- * Fires after each assistant turn. Delegates to observe-trigger with
- * force=false, so the cooldown + three-trigger OR logic from core/observer
- * gates whether observe.sh actually runs.
+ * Fires just before Claude Code compacts conversation context. Forces an
+ * observation pass regardless of cooldown or thresholds — compaction is
+ * about to destroy detail, so we capture whatever unobserved material is
+ * in the transcript right now. Also handles the `"manual"` trigger from
+ * `/compact` to cover the same ground.
  *
- * Fail-open: any error → no observation + exit 0. Never blocks the agent.
+ * Fail-open: any error → no observation + exit 0. Never blocks compaction.
  */
 
 import { readFileSync } from "node:fs";
@@ -27,14 +29,9 @@ try {
 
 import {
   runObservation,
-  sessionKeyFor,
   type HookInput,
   type TriggerResult,
 } from "./observe-trigger.js";
-
-// Re-exports for tests + back-compat.
-export { sessionKeyFor };
-export type StopResult = TriggerResult;
 
 export async function run(rawInput: string): Promise<TriggerResult> {
   let input: HookInput;
@@ -43,15 +40,15 @@ export async function run(rawInput: string): Promise<TriggerResult> {
   } catch {
     return { fired: false, reason: "malformed stdin" };
   }
-  return runObservation(input, { force: false, label: "obs" });
+  return runObservation(input, { force: true, label: "precompact" });
 }
 
-interface StopHookOutput {
+interface PreCompactOutput {
   suppressOutput: true;
 }
 
 function emit(): never {
-  const output: StopHookOutput = { suppressOutput: true };
+  const output: PreCompactOutput = { suppressOutput: true };
   process.stdout.write(JSON.stringify(output) + "\n");
   process.exit(0);
 }
@@ -75,12 +72,14 @@ async function main(): Promise<void> {
     const result = await run(raw);
     if (process.env.GREYMATTER_DEBUG === "1") {
       console.error(
-        `[greymatter/on-stop] fired=${result.fired} reason=${result.reason}`,
+        `[greymatter/on-pre-compact] fired=${result.fired} reason=${result.reason}`,
       );
     }
   } catch (err) {
     if (process.env.GREYMATTER_DEBUG === "1") {
-      console.error(`[greymatter/on-stop] error: ${(err as Error).message}`);
+      console.error(
+        `[greymatter/on-pre-compact] error: ${(err as Error).message}`,
+      );
     }
   }
   emit();
@@ -88,8 +87,8 @@ async function main(): Promise<void> {
 
 const isMain =
   import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("on-stop.js") ||
-  process.argv[1]?.endsWith("on-stop.ts");
+  process.argv[1]?.endsWith("on-pre-compact.js") ||
+  process.argv[1]?.endsWith("on-pre-compact.ts");
 
 if (isMain) {
   void main();

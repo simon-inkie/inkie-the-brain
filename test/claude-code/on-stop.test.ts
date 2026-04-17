@@ -151,7 +151,7 @@ describe("on-stop — run()", () => {
 
     const result = await run(makeInput());
     expect(result.fired).toBe(true);
-    expect(result.reason).toMatch(/msgs=16\/6/);
+    expect(result.reason).toMatch(/16 msgs/);
 
     // Detached spawn → wait for observe.sh log
     const fired = await waitForObserveLog();
