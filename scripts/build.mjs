@@ -174,9 +174,95 @@ writeFileSync(
 );
 log(`wrote ${hooksDist}/package.json`);
 
+// ===========================================================================
+// CLAUDE CODE ADAPTER
+// ===========================================================================
+
+const ccDist = join(DIST, "claude-code");
+mkdirSync(join(ccDist, "bin"), { recursive: true });
+
+const CC_HANDLERS = ["user-prompt-submit", "on-stop", "on-pre-compact"];
+
+for (const handler of CC_HANDLERS) {
+  await build({
+    entryPoints: [
+      join(ROOT, "adapters/claude-code/src", `${handler}.ts`),
+    ],
+    outfile: join(ccDist, `${handler}.js`),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    external: EXTERNALS,
+    sourcemap: "inline",
+    logLevel: "warning",
+  });
+  log(`claude-code handler bundled: ${handler}`);
+}
+
+// Copy shell wrappers + keep them executable.
+for (const handler of CC_HANDLERS) {
+  const srcBin = join(ROOT, "adapters/claude-code/bin", `${handler}.sh`);
+  const dstBin = join(ccDist, "bin", `${handler}.sh`);
+  cpSync(srcBin, dstBin);
+  chmodSync(dstBin, 0o755);
+}
+log("claude-code bin scripts copied");
+
+// memory-tools travels with the adapter so the hook resolves observe.sh
+// via CLAUDE_PLUGIN_ROOT/memory-tools without any env-var gymnastics.
+cpSync(
+  join(ROOT, "adapters/openclaw/hooks/memory-tools"),
+  join(ccDist, "memory-tools"),
+  { recursive: true },
+);
+for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.sh"]) {
+  const p = join(ccDist, "memory-tools", f);
+  if (existsSync(p)) chmodSync(p, 0o755);
+}
+log("claude-code memory-tools copied");
+
+// Copy Claude Code plugin manifest + hook manifest if present (Phase 6).
+const ccPluginSrc = join(ROOT, "adapters/claude-code/.claude-plugin");
+if (existsSync(ccPluginSrc)) {
+  cpSync(ccPluginSrc, join(ccDist, ".claude-plugin"), { recursive: true });
+  log("claude-code .claude-plugin copied");
+}
+const ccHooksSrc = join(ROOT, "adapters/claude-code/hooks");
+if (existsSync(ccHooksSrc)) {
+  cpSync(ccHooksSrc, join(ccDist, "hooks"), { recursive: true });
+  log("claude-code hooks manifest copied");
+}
+
+// Adapter package.json — runtime deps mirror what the bundled handlers
+// actually call at runtime (@google/genai for observe.sh's Node helpers,
+// qdrant/image/pdf bits for indexer/media-filer when they run under CC).
+const ccPkg = {
+  name: "greymatter-claude-code",
+  version: rootPkg.version,
+  description:
+    "greymatter Claude Code adapter — UserPromptSubmit/Stop/PreCompact hooks. Prebuilt, self-contained.",
+  type: "module",
+  dependencies: pickDeps(rootPkg.dependencies, [
+    "@google/genai",
+    "@qdrant/js-client-rest",
+    "gray-matter",
+    "image-size",
+    "pdf-lib",
+    "pdfjs-dist",
+    "glob",
+  ]),
+};
+writeFileSync(
+  join(ccDist, "package.json"),
+  JSON.stringify(ccPkg, null, 2) + "\n",
+);
+log(`wrote ${ccDist}/package.json`);
+
 log("build complete");
-log(`  install plugin:  openclaw plugins install ${pluginDist}`);
-log(`  install hooks:   openclaw plugins install ${hooksDist}`);
+log(`  install plugin:       openclaw plugins install ${pluginDist}`);
+log(`  install hooks:        openclaw plugins install ${hooksDist}`);
+log(`  claude-code adapter:  ${ccDist}`);
 
 // ---------------------------------------------------------------------------
 // helpers
