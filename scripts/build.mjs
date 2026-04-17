@@ -148,6 +148,15 @@ for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.s
 }
 log("memory-tools copied");
 
+// templates/ — seed files copied into new MEMORY_DIRs at init time
+// (OBSERVATION-PROMPT.md etc.). Ship them with every adapter so anyone
+// spinning up a fresh memory dir can reach them.
+const templatesSrc = join(ROOT, "templates");
+if (existsSync(templatesSrc)) {
+  cpSync(templatesSrc, join(hooksDist, "templates"), { recursive: true });
+  log("templates copied");
+}
+
 // Hook pack package.json
 const hooksPkg = {
   name: "greymatter-openclaw-hooks",
@@ -221,6 +230,11 @@ for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.s
   if (existsSync(p)) chmodSync(p, 0o755);
 }
 log("claude-code memory-tools copied");
+
+if (existsSync(templatesSrc)) {
+  cpSync(templatesSrc, join(ccDist, "templates"), { recursive: true });
+  log("claude-code templates copied");
+}
 
 // Copy Claude Code plugin manifest + hook manifest if present (Phase 6).
 const ccPluginSrc = join(ROOT, "adapters/claude-code/.claude-plugin");
