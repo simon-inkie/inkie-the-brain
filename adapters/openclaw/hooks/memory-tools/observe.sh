@@ -118,5 +118,10 @@ CHAR_THRESHOLD=$(jq -r '.reflectionCharThreshold // 8000' "$STATE_FILE" 2>/dev/n
 if [ "$NEW_COUNT" -ge "$COUNT_THRESHOLD" ] || [ "$NEW_CHARS" -ge "$CHAR_THRESHOLD" ]; then
     echo ""
     echo "⚡ Reflection threshold reached (count: $NEW_COUNT/$COUNT_THRESHOLD, chars: $NEW_CHARS/$CHAR_THRESHOLD)"
-    echo "   Run: memory/tools/reflect.sh"
+    if [ "${AUTO_REFLECT:-0}" = "1" ]; then
+        echo "   AUTO_REFLECT=1 → chaining reflect.sh"
+        exec bash "$SCRIPT_DIR/reflect.sh"
+    else
+        echo "   Run: memory/tools/reflect.sh"
+    fi
 fi

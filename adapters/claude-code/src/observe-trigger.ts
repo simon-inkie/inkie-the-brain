@@ -148,7 +148,7 @@ export async function runObservation(
     mkdirSync(memoryDir, { recursive: true });
     const child = spawn("bash", [observeSh, "--file", tmpFile], {
       cwd: dirname(memoryDir),
-      env: { ...process.env, MEMORY_DIR: memoryDir },
+      env: { ...process.env, MEMORY_DIR: memoryDir, AUTO_REFLECT: "1" },
       detached: true,
       stdio: "ignore",
     });
