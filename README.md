@@ -2,7 +2,7 @@
 
 Unified memory + context engine for agentic CLIs.
 
-**Status**: v0.2.0 — unified successor to the-brain + io-memory + io-memory-hooks. See `docs/merge-plan.md` for the migration rationale.
+**Status**: v0.2.0 — unified successor to the legacy `greymatter` + `io-memory` + `io-memory-hooks` repos. (Project renamed from `greymatter` → `the-brain` on 2026-04-19.) See `docs/merge-plan.md` for the migration rationale.
 
 ## What this does
 

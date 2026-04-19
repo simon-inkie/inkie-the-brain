@@ -1,5 +1,5 @@
 /**
- * Local types for the the-brain context engine.
+ * Local types for The Brain context engine.
  *
  * We define locally-compatible types for the OpenClaw ContextEngine contract
  * rather than importing from internal SDK paths (which aren't in the package

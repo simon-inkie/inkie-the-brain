@@ -1,5 +1,5 @@
 /**
- * Pure slicing function for the the-brain context engine.
+ * Pure slicing function for The Brain context engine.
  *
  * Takes a full message array and returns a bounded tail that:
  * 1. Keeps the last `recentTurnCount` messages verbatim.

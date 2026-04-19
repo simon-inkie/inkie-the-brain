@@ -52,7 +52,7 @@ Both adapters therefore give the LLM an unambiguous signal. Any future adapter m
 
 ## 4. Template canonical location
 
-Source of truth: `templates/OBSERVATION-PROMPT.md` in the the-brain repo.
+Source of truth: `templates/OBSERVATION-PROMPT.md` in The Brain repo.
 
 Build pipeline copies it to:
 

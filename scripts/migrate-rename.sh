@@ -7,6 +7,12 @@
 #        <worktree>/.greymatter/memory_root  →  <worktree>/.the-brain/memory_root
 #      Also sed-updates the *content* of each memory_root file to rewrite any
 #      literal `/.greymatter/` path references inside the pointer target path.
+#   3. Patches ~/.openclaw/openclaw.json to rewrite the 7 known `greymatter`
+#      references (hook pack id, source/install paths, MCP server path, plugin
+#      key, contextEngine slot binding). Backs up to openclaw.json.bak first.
+#   4. Renames Claude Code project memory slug dirs under ~/.claude/projects/
+#      that contain `greymatter` in the slug — CC derives the slug from cwd,
+#      so a repo-dir rename would otherwise orphan existing session memory.
 #
 # Usage:
 #   scripts/migrate-rename.sh           # DRY RUN (default — prints what would happen)
@@ -18,6 +24,22 @@
 #   - If the destination already exists, the operation is skipped (no clobber).
 #   - Idempotent: re-running after success does nothing.
 #   - Refuses to run if NOTHING needs doing (reports no-op cleanly).
+#   - openclaw.json is backed up to openclaw.json.bak before any edit.
+#
+# DEPLOY PLAYBOOK (run these steps AROUND this script):
+#   1. Stop the OpenClaw gateway (if running)
+#   2. Close any Claude Code sessions in the greymatter repo
+#   3. Rename the repo dir:   mv ~/io-projects/greymatter  ~/io-projects/the-brain
+#   4. Rebuild in new path:   ( cd ~/io-projects/the-brain && node scripts/build.mjs )
+#   5. Run this script:       ~/io-projects/the-brain/scripts/migrate-rename.sh --apply
+#   6. Reinstall OpenClaw hook pack:
+#        openclaw plugins uninstall greymatter-openclaw-hooks
+#        openclaw plugins install ~/io-projects/the-brain/dist/hooks
+#      (openclaw.json entry is now `the-brain-openclaw-hooks` after step 5)
+#   7. Restart OpenClaw gateway
+#   8. Verify plugin load in a fresh session: memory hook should fire and emit
+#      `<the-brain>` tags on UserPromptSubmit; observations land in
+#      ~/.the-brain/agents/<name>/memory/observations/
 
 set -euo pipefail
 
@@ -139,6 +161,96 @@ for root in "${SCAN_ROOTS[@]}"; do
         ACTIONS=$((ACTIONS + 1))
     done < <(find "$root" -maxdepth 4 -type f -path '*/.greymatter/memory_root' -print0 2>/dev/null)
 done
+
+# -------- 3. openclaw.json patch --------
+#
+# The OpenClaw gateway config pins 7 greymatter references that will break
+# plugin load after the repo dir rename. Three sed substitutions cover them:
+#   - "greymatter-openclaw-hooks"  → "the-brain-openclaw-hooks"   (hook pack id, install dir)
+#   - "/io-projects/greymatter/"   → "/io-projects/the-brain/"    (sourcePath, MCP path, plugin path)
+#   - "\"greymatter\""             → "\"the-brain\""              (plugin key, contextEngine slot)
+
+OPENCLAW_JSON="$HOME/.openclaw/openclaw.json"
+
+announce ""
+announce "Check: $OPENCLAW_JSON (OpenClaw gateway config)"
+
+if [[ ! -f "$OPENCLAW_JSON" ]]; then
+    announce "  not present — skipping"
+elif ! grep -q 'greymatter' "$OPENCLAW_JSON" 2>/dev/null; then
+    announce "  already migrated (no greymatter refs)"
+else
+    STALE_COUNT=$(grep -c 'greymatter' "$OPENCLAW_JSON")
+    announce "  found $STALE_COUNT greymatter reference(s) — will patch"
+    if [[ $APPLY -eq 1 ]]; then
+        cp "$OPENCLAW_JSON" "$OPENCLAW_JSON.bak"
+        announce "    backed up to: $OPENCLAW_JSON.bak"
+        sed -i \
+            -e 's|greymatter-openclaw-hooks|the-brain-openclaw-hooks|g' \
+            -e 's|/io-projects/greymatter/|/io-projects/the-brain/|g' \
+            -e 's|"greymatter"|"the-brain"|g' \
+            "$OPENCLAW_JSON"
+        announce "    patched in place"
+        REMAINING=$(grep -c 'greymatter' "$OPENCLAW_JSON" 2>/dev/null || echo "0")
+        if [[ "$REMAINING" -gt 0 ]]; then
+            announce "  ⚠️  $REMAINING greymatter ref(s) still present — inspect manually"
+            grep -n 'greymatter' "$OPENCLAW_JSON" | sed 's/^/      /'
+        fi
+    else
+        echo "      would run: cp $OPENCLAW_JSON $OPENCLAW_JSON.bak"
+        echo "      would run: sed -i (3 substitutions) $OPENCLAW_JSON"
+        announce "    affected lines:"
+        grep -n 'greymatter' "$OPENCLAW_JSON" | sed 's/^/      /'
+    fi
+    ACTIONS=$((ACTIONS + 1))
+fi
+
+# -------- 4. Claude Code project memory slug rename --------
+#
+# CC derives the project-memory slug from cwd:
+#   /foo/bar → -foo-bar   (and leading `.` becomes `-` too)
+# So ~/io-projects/greymatter becomes  ~/.claude/projects/-home-simon-io-projects-greymatter
+# and renaming the repo dir orphans the slug. We rename all slugs containing
+# `greymatter` in their name to the equivalent `the-brain` slug.
+
+CC_PROJECTS_DIR="$HOME/.claude/projects"
+
+announce ""
+announce "Check: CC project memory slug dirs under $CC_PROJECTS_DIR"
+
+if [[ ! -d "$CC_PROJECTS_DIR" ]]; then
+    announce "  $CC_PROJECTS_DIR not present — skipping"
+else
+    FOUND_SLUGS=0
+    while IFS= read -r -d '' old_slug_path; do
+        old_slug="$(basename "$old_slug_path")"
+        # Replace both `greymatter-dev` → `the-brain-dev` AND `greymatter` → `the-brain`.
+        # Order matters: compound token first so the standalone rewrite doesn't eat it.
+        new_slug="${old_slug//greymatter-dev/the-brain-dev}"
+        new_slug="${new_slug//greymatter/the-brain}"
+        new_slug_path="$CC_PROJECTS_DIR/$new_slug"
+
+        if [[ "$old_slug" == "$new_slug" ]]; then
+            continue
+        fi
+
+        FOUND_SLUGS=$((FOUND_SLUGS + 1))
+        announce "  found: $old_slug"
+        announce "    → $new_slug"
+
+        if [[ -e "$new_slug_path" ]]; then
+            announce "    dest already exists — SKIP (manual merge required)"
+            continue
+        fi
+
+        do_or_echo mv "$old_slug_path" "$new_slug_path"
+        ACTIONS=$((ACTIONS + 1))
+    done < <(find "$CC_PROJECTS_DIR" -maxdepth 1 -mindepth 1 -type d -name '*greymatter*' -print0 2>/dev/null)
+
+    if [[ $FOUND_SLUGS -eq 0 ]]; then
+        announce "  no greymatter slug dirs found — already migrated"
+    fi
+fi
 
 # -------- Summary --------
 

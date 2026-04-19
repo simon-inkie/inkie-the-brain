@@ -1,5 +1,5 @@
 /**
- * Memory block reader for the the-brain context engine.
+ * Memory block reader for The Brain context engine.
  *
  * Three modes controlled by `memoryBlockSource`:
  * - "memory-core": returns "" — OpenClaw's memory-core handles MEMORY.md injection. Safest.
