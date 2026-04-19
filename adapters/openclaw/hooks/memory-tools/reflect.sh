@@ -91,8 +91,11 @@ Please analyse these observations and produce a refined, condensed version that 
 
 $COMPRESSION"
 
-# Call Claude
-TIMESTAMP=$(date -u +"%Y-%m-%d")
+# Call Claude.
+# Second-resolution timestamp (not just date) so multiple reflections in
+# the same day — e.g. a manual replay-transcript reflect followed later
+# by an AUTO_REFLECT from a PreCompact — don't overwrite each other.
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 OUTPUT_FILE="$REF_DIR/$TIMESTAMP.md"
 
 echo "🧠 Running reflection..."
