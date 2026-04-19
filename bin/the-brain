@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# the-brain — global CLI wrapper.
+#
+# Resolves its own location (following symlinks), cds to the repo root,
+# and execs tsx cli/index.ts with all args passed through. Lets users
+# invoke `the-brain agent init <name>` from any directory without
+# having to cd into the repo first.
+#
+# Symlinked into ~/.local/bin/ by scripts/install-global.sh.
+
+set -euo pipefail
+
+# Resolve this script's real path even if invoked via symlink.
+# (BSD readlink on older macOS lacks -f, so chain falls back to pwd -P.)
+SELF="${BASH_SOURCE[0]}"
+while [ -h "$SELF" ]; do
+    DIR="$(cd -P "$(dirname "$SELF")" && pwd)"
+    SELF="$(readlink "$SELF")"
+    [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
+done
+BIN_DIR="$(cd -P "$(dirname "$SELF")" && pwd)"
+REPO_ROOT="$(cd -P "$BIN_DIR/.." && pwd)"
+
+if [ ! -f "$REPO_ROOT/cli/index.ts" ]; then
+    echo "the-brain: cli/index.ts not found at $REPO_ROOT — bin/the-brain was moved out of the repo?" >&2
+    exit 1
+fi
+
+cd "$REPO_ROOT"
+exec npx tsx cli/index.ts "$@"
