@@ -64,13 +64,25 @@ describe("resolveMemoryDir", () => {
     expect(resolveMemoryDir(testDir)).toBe(join(homedir(), "env-mem"));
   });
 
-  it("falls back to legacy OpenClaw workspace when no other tier matches", () => {
-    // Assuming no ~/.the-brain/memory/ exists during test (reasonable default)
-    // This test may short-circuit on tier 4 if user has ~/.the-brain/memory — that's fine.
+  it("falls back to an auto-silo under ~/.the-brain/agents/<basename>/memory/", () => {
+    // If the user has ~/.the-brain/memory/ (tier 4) it short-circuits there,
+    // otherwise tier 5 derives a per-project silo from the projectDir basename.
     const result = resolveMemoryDir(testDir);
     const userGlobal = join(homedir(), ".the-brain", "memory");
+    const expectedSilo = join(
+      homedir(),
+      ".the-brain",
+      "agents",
+      testDir.split("/").filter(Boolean).pop()!,
+      "memory",
+    );
+    expect([userGlobal, expectedSilo]).toContain(result);
+  });
+
+  it("never falls back to the legacy OpenClaw workspace", () => {
+    const result = resolveMemoryDir(testDir);
     const legacy = join(homedir(), ".openclaw", "workspace", "memory");
-    expect([userGlobal, legacy]).toContain(result);
+    expect(result).not.toBe(legacy);
   });
 
   it("ignores empty override file (falls through)", () => {

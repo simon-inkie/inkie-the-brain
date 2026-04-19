@@ -1,16 +1,22 @@
 import { existsSync, readFileSync, statSync } from "fs";
-import { resolve, join } from "path";
+import { resolve, join, basename } from "path";
 import { homedir } from "os";
 
 /**
  * Resolve the memory directory for a given Claude Code project.
  *
  * Resolution order (first match wins):
- *   1. `<projectDir>/memory/`                    — project-local (directory-as-agent)
- *   2. `<projectDir>/.the-brain/memory_root`     — override file pointing elsewhere
- *   3. `BRAIN_MEMORY_DIR` env var                — user-global escape hatch
- *   4. `~/.the-brain/memory/`                    — user-global default
- *   5. `~/.openclaw/workspace/memory/`           — legacy fallback (main Io agent)
+ *   1. `<projectDir>/memory/`                           — project-local (directory-as-agent)
+ *   2. `<projectDir>/.the-brain/memory_root`            — override file pointing elsewhere
+ *   3. `BRAIN_MEMORY_DIR` env var                       — user-global escape hatch
+ *   4. `~/.the-brain/memory/`                           — user-global default (if present)
+ *   5. `~/.the-brain/agents/<basename(projectDir)>/memory/` — auto-silo per project
+ *
+ * Tier 5 auto-silos by project-dir basename so every CC session gets its
+ * own memory dir keyed off the repo name — never mixing with another
+ * project or with the OpenClaw main-Io workspace. Previously this tier
+ * fell back to `~/.openclaw/workspace/memory/`, which caused CC sessions
+ * (e.g. inkie-app-v2-feature3) to pollute Io agent memory.
  *
  * The returned path is absolute but is NOT required to exist — callers
  * that need to write should `mkdirSync(..., { recursive: true })` first.
@@ -34,8 +40,8 @@ export function resolveMemoryDir(projectDir: string): string {
   const userGlobal = join(homedir(), ".the-brain", "memory");
   if (isDirectory(userGlobal)) return userGlobal;
 
-  // 5. Legacy main-Io fallback
-  return join(homedir(), ".openclaw", "workspace", "memory");
+  // 5. Auto-silo per project under ~/.the-brain/agents/<basename>/memory/
+  return join(homedir(), ".the-brain", "agents", basename(project), "memory");
 }
 
 /**
