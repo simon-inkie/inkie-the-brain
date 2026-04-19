@@ -6,3 +6,7 @@ dist/
 .env.local
 .DS_Store
 *.log
+
+# the-brain runtime state (external agent memory)
+.the-brain/
+memory/
