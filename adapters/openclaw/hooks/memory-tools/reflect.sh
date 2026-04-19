@@ -26,6 +26,10 @@ fi
 # Ensure directories exist
 mkdir -p "$REF_DIR"
 
+# Bootstrap state file (same rationale as observe.sh — jq update pattern
+# can't create it from nothing).
+[ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
+
 # Read state
 UNPROCESSED=$(jq -r '.unprocessedObservationCount // 0' "$STATE_FILE" 2>/dev/null || echo "0")
 

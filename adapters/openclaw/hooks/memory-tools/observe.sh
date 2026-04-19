@@ -21,6 +21,12 @@ PROMPT_FILE="$MEMORY_DIR/OBSERVATION-PROMPT.md"
 # Ensure directories exist
 mkdir -p "$OBS_DIR"
 
+# Bootstrap state file — jq's "read-update-rename" pattern below cannot
+# create the file from nothing. Without this the first observation leaves
+# a 0-byte .tmp and unprocessedObservationCount stays stuck at 1 forever,
+# so AUTO_REFLECT thresholds never cross.
+[ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
+
 # Get conversation input
 if [ "$1" = "--file" ] && [ -n "$2" ]; then
     CONVERSATION=$(cat "$2")
@@ -47,8 +53,10 @@ if [ -z "$SYSTEM_PROMPT" ]; then
     SYSTEM_PROMPT="You are Io's memory consciousness. Extract structured observations from this conversation using XML tags: <observations>, <current-task>, <suggested-response>. Use priority emojis: 🔴 High, 🟡 Medium, 🟢 Low, ✅ Completed."
 fi
 
-# Generate timestamp for filename
-TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M")
+# Generate timestamp for filename.
+# Second resolution (not minute) so bursts — e.g. replay-transcript backfill
+# firing many observations in quick succession — don't overwrite each other.
+TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 OUTPUT_FILE="$OBS_DIR/$TIMESTAMP.md"
 
 # Build the full prompt
