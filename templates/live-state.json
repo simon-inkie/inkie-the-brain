@@ -1,0 +1,11 @@
+{
+  "hotReflectionCount": 3,
+  "eraCompressionLevel": 0,
+  "eraCoverageThroughReflectionDate": null,
+  "lastRebuildAt": null,
+  "lastBlockCharCount": 0,
+  "softBudgetChars": 80000,
+  "hardBudgetChars": 120000,
+  "minHotReflectionCount": 1,
+  "maxEraCompressionLevel": 3
+}
