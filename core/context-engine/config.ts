@@ -1,6 +1,6 @@
-import type { GreymatterConfig } from "./types.js";
+import type { TheBrainConfig } from "./types.js";
 
-export const DEFAULT_CONFIG: GreymatterConfig = {
+export const DEFAULT_CONFIG: TheBrainConfig = {
   recentTurnCount: 20,
   preserveFirstUserMessage: true,
   minRawFloor: 4,
@@ -18,7 +18,7 @@ export const DEFAULT_CONFIG: GreymatterConfig = {
 export function parseConfig(
   raw?: Record<string, unknown>,
   workspace?: string,
-): GreymatterConfig {
+): TheBrainConfig {
   const r = raw ?? {};
   const ws = workspace ?? process.env.HOME ?? "";
 
@@ -30,7 +30,7 @@ export function parseConfig(
     r.memoryBlockSource === "file" || r.memoryBlockSource === "none"
       ? r.memoryBlockSource
       : "memory-core"
-  ) as GreymatterConfig["memoryBlockSource"];
+  ) as TheBrainConfig["memoryBlockSource"];
 
   return {
     recentTurnCount,

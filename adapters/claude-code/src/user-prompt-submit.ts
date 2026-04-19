@@ -1,5 +1,5 @@
 /**
- * greymatter — Claude Code UserPromptSubmit hook handler.
+ * the-brain — Claude Code UserPromptSubmit hook handler.
  *
  * Injects the MEMORY.md IO_LIVE block as `additionalContext` on every prompt
  * so the model sees curated long-term memory, even right after a /compact.
@@ -78,14 +78,14 @@ export async function run(rawInput: string): Promise<string> {
   const memFile = memoryFilePath(memoryDir);
 
   const maxChars =
-    parseMaxChars(process.env.GREYMATTER_MAX_INJECTED_CHARS) ??
+    parseMaxChars(process.env.BRAIN_MAX_INJECTED_CHARS) ??
     MAX_INJECTED_CHARS_DEFAULT;
 
   const block = await readInjectedMemoryBlock({
     memoryBlockSource: "file",
     memoryFile: memFile,
     maxInjectedChars: maxChars,
-    debug: process.env.GREYMATTER_DEBUG === "1",
+    debug: process.env.BRAIN_DEBUG === "1",
   });
 
   if (!block.trim()) return "";
@@ -100,7 +100,7 @@ function parseMaxChars(raw: string | undefined): number | null {
 }
 
 export function wrapForInjection(block: string): string {
-  return `<greymatter-memory>\n${block}\n</greymatter-memory>`;
+  return `<the-brain>\n${block}\n</the-brain>`;
 }
 
 async function main(): Promise<void> {

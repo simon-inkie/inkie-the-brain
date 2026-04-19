@@ -1,5 +1,5 @@
 #!/bin/bash
-# greymatter — Claude Code PreCompact hook entry.
+# the-brain — Claude Code PreCompact hook entry.
 # Force-fires observe.sh so detail survives compaction. Fails open.
 
 set -u

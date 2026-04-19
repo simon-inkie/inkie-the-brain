@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 let testDir: string;
 
 beforeEach(async () => {
-  testDir = join(tmpdir(), `greymatter-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  testDir = join(tmpdir(), `the-brain-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(testDir, { recursive: true });
 });
 

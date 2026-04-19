@@ -1,5 +1,5 @@
 /**
- * Local types for the greymatter context engine.
+ * Local types for the the-brain context engine.
  *
  * We define locally-compatible types for the OpenClaw ContextEngine contract
  * rather than importing from internal SDK paths (which aren't in the package
@@ -12,10 +12,10 @@
  */
 
 // ---------------------------------------------------------------------------
-// Greymatter config
+// The Brain config
 // ---------------------------------------------------------------------------
 
-export interface GreymatterConfig {
+export interface TheBrainConfig {
   /** How many most-recent messages to keep verbatim. Default 20. */
   recentTurnCount: number;
 

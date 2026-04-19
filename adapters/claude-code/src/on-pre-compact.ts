@@ -1,5 +1,5 @@
 /**
- * greymatter — Claude Code PreCompact hook handler.
+ * the-brain — Claude Code PreCompact hook handler.
  *
  * Fires just before Claude Code compacts conversation context. Forces an
  * observation pass regardless of cooldown or thresholds — compaction is
@@ -70,15 +70,15 @@ async function main(): Promise<void> {
   }
   try {
     const result = await run(raw);
-    if (process.env.GREYMATTER_DEBUG === "1") {
+    if (process.env.BRAIN_DEBUG === "1") {
       console.error(
-        `[greymatter/on-pre-compact] fired=${result.fired} reason=${result.reason}`,
+        `[the-brain/on-pre-compact] fired=${result.fired} reason=${result.reason}`,
       );
     }
   } catch (err) {
-    if (process.env.GREYMATTER_DEBUG === "1") {
+    if (process.env.BRAIN_DEBUG === "1") {
       console.error(
-        `[greymatter/on-pre-compact] error: ${(err as Error).message}`,
+        `[the-brain/on-pre-compact] error: ${(err as Error).message}`,
       );
     }
   }

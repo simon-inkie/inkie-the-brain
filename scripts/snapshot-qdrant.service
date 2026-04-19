@@ -1,12 +1,12 @@
 [Unit]
 Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
-Documentation=file:///home/simon/io-projects/greymatter/README.md
+Documentation=file:///home/simon/io-projects/the-brain/README.md
 Wants=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/simon/io-projects/greymatter/scripts/snapshot-qdrant.sh
+ExecStart=/home/simon/io-projects/the-brain/scripts/snapshot-qdrant.sh
 # Redirect output to journal — view with `journalctl --user -u snapshot-qdrant`
 StandardOutput=journal
 StandardError=journal

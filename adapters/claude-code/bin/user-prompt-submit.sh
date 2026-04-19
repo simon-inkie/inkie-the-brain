@@ -1,5 +1,5 @@
 #!/bin/bash
-# greymatter — Claude Code UserPromptSubmit hook entry.
+# the-brain — Claude Code UserPromptSubmit hook entry.
 # Reads hook JSON on stdin, emits additionalContext JSON to stdout.
 # Exits 0 on every non-catastrophic path (fail-open — never block prompts).
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { GreymatterEngine } from "../../core/context-engine/engine.js";
+import { TheBrainEngine } from "../../core/context-engine/engine.js";
 import { DEFAULT_CONFIG } from "../../core/context-engine/config.js";
-import type { Message, UserMessage, AssistantMessage, GreymatterConfig } from "../../core/context-engine/types.js";
+import type { Message, UserMessage, AssistantMessage, TheBrainConfig } from "../../core/context-engine/types.js";
 
 function user(content: string, ts = Date.now()): UserMessage {
   return { role: "user", content, timestamp: ts };
@@ -14,21 +14,21 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
-function makeEngine(overrides: Partial<GreymatterConfig> = {}): GreymatterEngine {
-  return new GreymatterEngine({ ...DEFAULT_CONFIG, ...overrides });
+function makeEngine(overrides: Partial<TheBrainConfig> = {}): TheBrainEngine {
+  return new TheBrainEngine({ ...DEFAULT_CONFIG, ...overrides });
 }
 
-describe("GreymatterEngine.info", () => {
+describe("TheBrainEngine.info", () => {
   it("has correct id, name, version, and ownsCompaction", () => {
     const engine = makeEngine();
-    expect(engine.info.id).toBe("greymatter");
-    expect(engine.info.name).toBe("Greymatter");
+    expect(engine.info.id).toBe("the-brain");
+    expect(engine.info.name).toBe("The Brain");
     expect(engine.info.version).toBe("0.1.0");
     expect(engine.info.ownsCompaction).toBe(true);
   });
 });
 
-describe("GreymatterEngine.ingest", () => {
+describe("TheBrainEngine.ingest", () => {
   it("returns { ingested: true } (no-op)", async () => {
     const engine = makeEngine();
     const result = await engine.ingest({
@@ -39,7 +39,7 @@ describe("GreymatterEngine.ingest", () => {
   });
 });
 
-describe("GreymatterEngine.compact", () => {
+describe("TheBrainEngine.compact", () => {
   it("returns graceful no-op with reason", async () => {
     const engine = makeEngine();
     const result = await engine.compact({
@@ -48,18 +48,18 @@ describe("GreymatterEngine.compact", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(false);
-    expect(result.reason).toContain("greymatter");
+    expect(result.reason).toContain("the-brain");
   });
 });
 
-describe("GreymatterEngine.dispose", () => {
+describe("TheBrainEngine.dispose", () => {
   it("resolves without error", async () => {
     const engine = makeEngine();
     await expect(engine.dispose()).resolves.toBeUndefined();
   });
 });
 
-describe("GreymatterEngine.afterTurn", () => {
+describe("TheBrainEngine.afterTurn", () => {
   it("resolves without error", async () => {
     const engine = makeEngine();
     await expect(
@@ -73,7 +73,7 @@ describe("GreymatterEngine.afterTurn", () => {
   });
 });
 
-describe("GreymatterEngine.assemble", () => {
+describe("TheBrainEngine.assemble", () => {
   it("slices messages and returns AssembleResult shape", async () => {
     const engine = makeEngine({ recentTurnCount: 2, preserveFirstUserMessage: false });
     const messages: Message[] = [

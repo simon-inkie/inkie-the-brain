@@ -1,16 +1,16 @@
-# Greymatter — Claude Code Adapter Spec
+# The Brain — Claude Code Adapter Spec
 
 **Status:** spec, not started
 **Date:** 2026-04-16
-**Goal:** port greymatter from OpenClaw to Claude Code as the memory layer for Io's upcoming directory-as-agent platform (see `brain/ideas/claude-io-multi-agent-platform.md`).
+**Goal:** port the-brain from OpenClaw to Claude Code as the memory layer for Io's upcoming directory-as-agent platform (see `brain/ideas/claude-io-multi-agent-platform.md`).
 
 ---
 
 ## 1. The framing shift
 
-Greymatter in OpenClaw is a **context engine** — it slices the conversation array down to a bounded window and injects a memory block each turn. Its reason for existing is to fight OpenClaw's unbounded `contents` growth.
+The Brain in OpenClaw is a **context engine** — it slices the conversation array down to a bounded window and injects a memory block each turn. Its reason for existing is to fight OpenClaw's unbounded `contents` growth.
 
-Greymatter in Claude Code is a **memory system** — it exposes curated, compaction-proof long-term memory to the model via hook-level context injection. Claude Code handles context bounding natively via its own compaction. Greymatter's value moves up the stack: **memory that survives compaction.**
+The Brain in Claude Code is a **memory system** — it exposes curated, compaction-proof long-term memory to the model via hook-level context injection. Claude Code handles context bounding natively via its own compaction. The Brain's value moves up the stack: **memory that survives compaction.**
 
 This is the same codebase with the same observer pipeline, just reframed for what Claude Code actually needs.
 
@@ -22,7 +22,7 @@ Claude Code compaction is destructive to session-local detail. Even with Opus 4.
 - Spec decisions made mid-session
 - The shape of rejected alternatives
 
-Greymatter's memory lives on disk (`memory/observations/`, `memory/reflections/`, `MEMORY.md`). After compaction, the next turn re-injects the live memory block. Continuity is restored, even though the session itself got summarised.
+The Brain's memory lives on disk (`memory/observations/`, `memory/reflections/`, `MEMORY.md`). After compaction, the next turn re-injects the live memory block. Continuity is restored, even though the session itself got summarised.
 
 ---
 
@@ -93,7 +93,7 @@ Greymatter's memory lives on disk (`memory/observations/`, `memory/reflections/`
   "mcpServers": {
     "io-memory": {
       "command": "node",
-      "args": ["/home/simon/io-projects/greymatter/dist/mcp/server.js"],
+      "args": ["/home/simon/io-projects/the-brain/dist/mcp/server.js"],
       "env": { "GEMINI_API_KEY": "…", "QDRANT_API_KEY": "…" }
     }
   }
@@ -132,8 +132,8 @@ Provides the `remembering` tool — semantic search over brain + observations + 
 **Hook behaviour:** on fire, derive `MEMORY_DIR` from `cwd`:
 
 - If `cwd/memory/` exists → use `cwd/memory/`
-- Else check for `cwd/.greymatter/memory_root` override file
-- Else fall back to a user-global default (`~/.greymatter/memory/` or `GREYMATTER_MEMORY_DIR` env)
+- Else check for `cwd/.the-brain/memory_root` override file
+- Else fall back to a user-global default (`~/.the-brain/memory/` or `BRAIN_MEMORY_DIR` env)
 
 **Parallel sessions in the same project** (same `cwd`) naturally share the same memory dir. They coordinate via the existing `observationInFlight` lock in `observer-state.json`.
 
@@ -144,7 +144,7 @@ Provides the `remembering` tool — semantic search over brain + observations + 
 Mirror the io-auto-mode dual-adapter pattern:
 
 ```
-greymatter/
+the-brain/
 ├── core/                                # platform-agnostic (unchanged)
 │   ├── context-engine/
 │   ├── observer/                        # (new split from adapter — see §7)
@@ -184,7 +184,7 @@ greymatter/
 
 ## 6. Config
 
-### Global defaults: `~/.greymatter/config.json`
+### Global defaults: `~/.the-brain/config.json`
 
 ```jsonc
 {
@@ -204,7 +204,7 @@ greymatter/
 }
 ```
 
-### Per-project override: `${cwd}/.greymatter/config.json`
+### Per-project override: `${cwd}/.the-brain/config.json`
 
 Additive merge over global (same pattern as io-auto-mode). Per-project can tune thresholds for busy vs idle projects.
 
@@ -258,7 +258,7 @@ Both adapters (`openclaw` and `claude-code`) then import from `core/observer/` a
 | 2 | Write `src/user-prompt-submit.ts` — read MEMORY.md live block, emit `additionalContext` JSON. Use existing `readInjectedMemoryBlock()` from `core/context-engine/`. | 1h |
 | 3 | Write `src/on-stop.ts` — wraps `evaluateShouldObserve()` + fires `observe.sh` when due. Uses transcript-pointer logic from `core/observer/`. | 1-2h |
 | 4 | Write `src/on-pre-compact.ts` — force-fire observation regardless of cooldown. `PreCompact` hook payload + behaviour verified via quick live test. | 1h |
-| 5 | Build script — extend `scripts/build.mjs` to bundle the three Claude Code hooks alongside existing greymatter dist. | 30m |
+| 5 | Build script — extend `scripts/build.mjs` to bundle the three Claude Code hooks alongside existing the-brain dist. | 30m |
 | 6 | `adapters/claude-code/.claude-plugin/plugin.json` + `hooks/hooks.json` | 30m |
 | 7 | MCP wiring — verify `mcp/server.ts` runs under Claude Code's MCP config. | 30m |
 | 8 | Local install flow — `pnpm build && claude --plugin-dir ./dist/claude-code` (dev) or bake into `~/.claude/settings.json` (permanent) | 30m |
@@ -315,7 +315,7 @@ v1 answer: share. Observations are per-agent (per-project), not per-session. If 
 
 ## 10. Migration strategy
 
-Greymatter's OpenClaw adapter stays live throughout. The Claude Code adapter is additive — both can coexist:
+The Brain's OpenClaw adapter stays live throughout. The Claude Code adapter is additive — both can coexist:
 
 - OpenClaw agents (Io's current main) keep using the OpenClaw plugin + hook pack
 - New Claude Code agents use the Claude Code adapter

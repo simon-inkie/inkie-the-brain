@@ -29,7 +29,7 @@ CONTAINER=qdrant-io
 HOST_BACKUP_DIR="${HOME}/io-data/qdrant-rescue/snapshots"
 ENV_FILE="${HOME}/io-data/.env"
 QDRANT_URL="http://localhost:6333"
-GREYMATTER_DIR="${HOME}/io-projects/greymatter"
+BRAIN_DIR="${HOME}/io-projects/the-brain"
 COLLECTIONS=(brain-vault io-observations io-reflections io-messages io-assets)
 SKIP_REINDEX=false
 
@@ -225,7 +225,7 @@ if [ ${#DRIFT_COLLECTIONS[@]} -gt 0 ] && [ "$SKIP_REINDEX" = "false" ]; then
 
     if [ "$NEED_INDEX" = "true" ]; then
         log "  reindexing brain/observations/reflections..."
-        if cd "$GREYMATTER_DIR" && npx tsx cli/index.ts index 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
+        if cd "$BRAIN_DIR" && npx tsx cli/index.ts index 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
             log "  ✓ brain/obs/refl reindex complete"
         else
             log "  ⚠️ brain/obs/refl reindex failed (non-fatal)"
@@ -234,7 +234,7 @@ if [ ${#DRIFT_COLLECTIONS[@]} -gt 0 ] && [ "$SKIP_REINDEX" = "false" ]; then
 
     if [ "$NEED_MESSAGES" = "true" ]; then
         log "  reindexing messages..."
-        if cd "$GREYMATTER_DIR" && npx tsx cli/index.ts index-messages 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
+        if cd "$BRAIN_DIR" && npx tsx cli/index.ts index-messages 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
             log "  ✓ messages reindex complete"
         else
             log "  ⚠️ messages reindex failed (non-fatal)"
@@ -243,7 +243,7 @@ if [ ${#DRIFT_COLLECTIONS[@]} -gt 0 ] && [ "$SKIP_REINDEX" = "false" ]; then
 
     if [ "$NEED_ASSETS" = "true" ]; then
         log "  reindexing assets..."
-        if cd "$GREYMATTER_DIR" && npx tsx cli/index.ts index-assets 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
+        if cd "$BRAIN_DIR" && npx tsx cli/index.ts index-assets 2>&1 | tail -3 | while read -r line; do log "    $line"; done; then
             log "  ✓ assets reindex complete"
         else
             log "  ⚠️ assets reindex failed (non-fatal)"

@@ -1,8 +1,8 @@
-# greymatter
+# the-brain
 
 Unified memory + context engine for agentic CLIs.
 
-**Status**: v0.2.0 — unified successor to greymatter + io-memory + io-memory-hooks. See `docs/merge-plan.md` for the migration rationale.
+**Status**: v0.2.0 — unified successor to the-brain + io-memory + io-memory-hooks. See `docs/merge-plan.md` for the migration rationale.
 
 ## What this does
 
@@ -21,8 +21,8 @@ Unified memory + context engine for agentic CLIs.
 ## Install (once merge lands)
 
 ```bash
-openclaw plugins install ~/io-projects/greymatter/adapters/openclaw/plugin
-openclaw plugins install ~/io-projects/greymatter/adapters/openclaw/hooks
+openclaw plugins install ~/io-projects/the-brain/adapters/openclaw/plugin
+openclaw plugins install ~/io-projects/the-brain/adapters/openclaw/hooks
 ```
 
 ## Layout
@@ -71,7 +71,7 @@ docs/              handover, spec, decisions
 
 ## Docs
 
-- `docs/context-engine-handover.md` — greymatter context engine design
+- `docs/context-engine-handover.md` — the-brain context engine design
 - `docs/openclaw-context-engine.md` — plugin integration details
 - `docs/transcript-pointer-refactor.md` — observer architecture
 - `docs/merge-plan.md` — three-repo → one-repo migration plan

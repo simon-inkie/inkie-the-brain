@@ -1,5 +1,5 @@
 {
-  "name": "greymatter",
+  "name": "the-brain",
   "version": "0.2.0",
   "description": "Unified memory + context engine for agentic CLIs. Ships as OpenClaw plugin + hook pack today; Claude Code adapter later.",
   "type": "module",

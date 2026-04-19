@@ -1,5 +1,5 @@
 #!/bin/bash
-# greymatter — Claude Code Stop hook entry.
+# the-brain — Claude Code Stop hook entry.
 # Reads hook JSON on stdin, fires observe.sh out of band, exits 0.
 # Fail-open: the agent never blocks on an observation pass failing.
 

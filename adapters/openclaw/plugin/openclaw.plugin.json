@@ -1,6 +1,6 @@
 {
-  "id": "greymatter",
-  "name": "Greymatter",
+  "id": "the-brain",
+  "name": "The Brain",
   "kind": "context-engine",
   "version": "0.2.0",
   "description": "Context engine plugin — bounds per-turn message history via intelligent slicing. Fixes unbounded contents growth in long-running sessions.",

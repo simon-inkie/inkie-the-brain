@@ -17,12 +17,12 @@ describe("user-prompt-submit — run()", () => {
   beforeEach(() => {
     testDir = join(
       tmpdir(),
-      `gm-ups-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `tb-ups-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     mkdirSync(join(testDir, "memory"), { recursive: true });
     // Force resolution to this project's memory dir
-    delete process.env.GREYMATTER_MEMORY_DIR;
-    delete process.env.GREYMATTER_MAX_INJECTED_CHARS;
+    delete process.env.BRAIN_MEMORY_DIR;
+    delete process.env.BRAIN_MAX_INJECTED_CHARS;
   });
 
   afterEach(() => {
@@ -47,12 +47,12 @@ describe("user-prompt-submit — run()", () => {
 
   it("extracts the IO_LIVE block and wraps it", async () => {
     writeMemoryFile(
-      `# MEMORY\n\n${LIVE_START}\nSimon is building greymatter\n${LIVE_END}\n`,
+      `# MEMORY\n\n${LIVE_START}\nSimon is building the-brain\n${LIVE_END}\n`,
     );
     const out = await run(JSON.stringify({ cwd: testDir }));
-    expect(out).toContain("<greymatter-memory>");
-    expect(out).toContain("Simon is building greymatter");
-    expect(out).toContain("</greymatter-memory>");
+    expect(out).toContain("<the-brain>");
+    expect(out).toContain("Simon is building the-brain");
+    expect(out).toContain("</the-brain>");
   });
 
   it("returns empty string on malformed stdin JSON", async () => {
@@ -67,10 +67,10 @@ describe("user-prompt-submit — run()", () => {
     expect(typeof out).toBe("string");
   });
 
-  it("honours GREYMATTER_MAX_INJECTED_CHARS when content exceeds limit", async () => {
+  it("honours BRAIN_MAX_INJECTED_CHARS when content exceeds limit", async () => {
     const large = "x".repeat(5000);
     writeMemoryFile(`${LIVE_START}\n${large}\n${LIVE_END}\n`);
-    process.env.GREYMATTER_MAX_INJECTED_CHARS = "100";
+    process.env.BRAIN_MAX_INJECTED_CHARS = "100";
 
     const out = await run(JSON.stringify({ cwd: testDir }));
     expect(out).toContain("truncated");
@@ -80,9 +80,9 @@ describe("user-prompt-submit — run()", () => {
 });
 
 describe("wrapForInjection", () => {
-  it("wraps with greymatter-memory tags", () => {
+  it("wraps with the-brain tags", () => {
     expect(wrapForInjection("hello")).toBe(
-      "<greymatter-memory>\nhello\n</greymatter-memory>",
+      "<the-brain>\nhello\n</the-brain>",
     );
   });
 });

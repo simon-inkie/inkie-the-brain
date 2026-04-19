@@ -1,5 +1,5 @@
 /**
- * Memory block reader for the greymatter context engine.
+ * Memory block reader for the the-brain context engine.
  *
  * Three modes controlled by `memoryBlockSource`:
  * - "memory-core": returns "" — OpenClaw's memory-core handles MEMORY.md injection. Safest.
@@ -8,7 +8,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import type { GreymatterConfig } from "./types.js";
+import type { TheBrainConfig } from "./types.js";
 
 const ANCHOR_START = "<!-- IO_LIVE_START -->";
 const ANCHOR_END = "<!-- IO_LIVE_END -->";
@@ -50,7 +50,7 @@ function truncateFromTop(text: string, maxChars: number): string {
  * Never throws — I/O errors become empty string + optional console warning.
  */
 export async function readInjectedMemoryBlock(
-  cfg: Pick<GreymatterConfig, "memoryBlockSource" | "memoryFile" | "maxInjectedChars" | "debug">,
+  cfg: Pick<TheBrainConfig, "memoryBlockSource" | "memoryFile" | "maxInjectedChars" | "debug">,
 ): Promise<string> {
   if (cfg.memoryBlockSource === "memory-core" || cfg.memoryBlockSource === "none") {
     return "";
@@ -64,7 +64,7 @@ export async function readInjectedMemoryBlock(
   } catch (err) {
     if (cfg.debug) {
       console.warn(
-        `[greymatter] memory-reader: failed to read ${cfg.memoryFile}: ${err instanceof Error ? err.message : err}`,
+        `[the-brain] memory-reader: failed to read ${cfg.memoryFile}: ${err instanceof Error ? err.message : err}`,
       );
     }
     return "";

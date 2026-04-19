@@ -1,5 +1,5 @@
 /**
- * GreymatterEngine — OpenClaw context engine that bounds per-turn
+ * TheBrainEngine — OpenClaw context engine that bounds per-turn
  * message history via intelligent slicing.
  *
  * Implements a shape-compatible ContextEngine contract using locally-defined
@@ -10,22 +10,22 @@ import { sliceRecent, approxChars } from "./assemble.js";
 import { readInjectedMemoryBlock } from "./memory-reader.js";
 import type {
   Message,
-  GreymatterConfig,
+  TheBrainConfig,
   ContextEngineInfo,
   AssembleResult,
   CompactResult,
   IngestResult,
 } from "./types.js";
 
-export class GreymatterEngine {
+export class TheBrainEngine {
   readonly info: ContextEngineInfo = {
-    id: "greymatter",
-    name: "Greymatter",
+    id: "the-brain",
+    name: "The Brain",
     version: "0.1.0",
     ownsCompaction: true,
   };
 
-  constructor(private readonly cfg: GreymatterConfig) {}
+  constructor(private readonly cfg: TheBrainConfig) {}
 
   /**
    * No-op. Io's own hooks (io-observer, io-message-indexer) handle message
@@ -63,7 +63,7 @@ export class GreymatterEngine {
 
     if (this.cfg.debug) {
       console.log(
-        `[greymatter] kept=${sliced.length}/${messages.length} ` +
+        `[the-brain] kept=${sliced.length}/${messages.length} ` +
           `memChars=${memoryBlock.length} estTok=${estimatedTokens}`,
       );
     }
@@ -76,7 +76,7 @@ export class GreymatterEngine {
   }
 
   /**
-   * No-op. Greymatter owns compaction via per-turn slicing — there is no
+   * No-op. The Brain owns compaction via per-turn slicing — there is no
    * separate compaction pass.
    */
   async compact(_params: {
@@ -92,7 +92,7 @@ export class GreymatterEngine {
     return {
       ok: true,
       compacted: false,
-      reason: "greymatter owns compaction via per-turn slicing",
+      reason: "the-brain owns compaction via per-turn slicing",
     };
   }
 

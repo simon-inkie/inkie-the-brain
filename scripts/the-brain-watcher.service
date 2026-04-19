@@ -1,0 +1,29 @@
+# The Brain File Watcher — systemd user service
+#
+# Install:
+#   cp scripts/the-brain-watcher.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable the-brain-watcher
+#   systemctl --user start the-brain-watcher
+#
+# Check status:
+#   systemctl --user status the-brain-watcher
+#   journalctl --user -u the-brain-watcher -f
+#
+# Stop:
+#   systemctl --user stop the-brain-watcher
+
+[Unit]
+Description=The Brain File Watcher — auto-indexes brain + memory files into Qdrant
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/simon/io-projects/the-brain
+ExecStart=/home/simon/.local/share/pnpm/pnpm watch
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/home/simon/io-data/.env
+
+[Install]
+WantedBy=default.target

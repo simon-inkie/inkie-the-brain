@@ -52,7 +52,7 @@ describe("on-pre-compact — force-fire semantics", () => {
   beforeEach(() => {
     testDir = join(
       tmpdir(),
-      `gm-precompact-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `tb-precompact-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     memoryDir = join(testDir, "memory");
     mkdirSync(memoryDir, { recursive: true });
@@ -67,9 +67,9 @@ describe("on-pre-compact — force-fire semantics", () => {
     );
     chmodSync(join(toolsDir, "observe.sh"), 0o755);
 
-    process.env.GREYMATTER_TOOLS_DIR = toolsDir;
-    process.env.GREYMATTER_MEMORY_DIR = memoryDir;
-    delete process.env.GREYMATTER_DEBUG;
+    process.env.BRAIN_TOOLS_DIR = toolsDir;
+    process.env.BRAIN_MEMORY_DIR = memoryDir;
+    delete process.env.BRAIN_DEBUG;
   });
 
   afterEach(() => {

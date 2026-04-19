@@ -1,8 +1,8 @@
 {
-  "name": "greymatter-openclaw-hooks",
+  "name": "the-brain-openclaw-hooks",
   "version": "0.2.0",
   "private": true,
-  "description": "OpenClaw hook pack — io-observer, io-message-indexer, io-media-filer. Thin wrappers over greymatter/core.",
+  "description": "OpenClaw hook pack — io-observer, io-message-indexer, io-media-filer. Thin wrappers over the-brain/core.",
   "type": "module",
   "dependencies": {
     "@google/genai": "^1.46.0",

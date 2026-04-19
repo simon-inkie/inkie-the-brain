@@ -7,9 +7,9 @@ import { homedir } from "os";
  *
  * Resolution order (first match wins):
  *   1. `<projectDir>/memory/`                    — project-local (directory-as-agent)
- *   2. `<projectDir>/.greymatter/memory_root`    — override file pointing elsewhere
- *   3. `GREYMATTER_MEMORY_DIR` env var           — user-global escape hatch
- *   4. `~/.greymatter/memory/`                   — user-global default
+ *   2. `<projectDir>/.the-brain/memory_root`     — override file pointing elsewhere
+ *   3. `BRAIN_MEMORY_DIR` env var                — user-global escape hatch
+ *   4. `~/.the-brain/memory/`                    — user-global default
  *   5. `~/.openclaw/workspace/memory/`           — legacy fallback (main Io agent)
  *
  * The returned path is absolute but is NOT required to exist — callers
@@ -22,16 +22,16 @@ export function resolveMemoryDir(projectDir: string): string {
   const localMemory = join(project, "memory");
   if (isDirectory(localMemory)) return localMemory;
 
-  // 2. cwd/.greymatter/memory_root (file containing a path)
-  const override = readOverride(join(project, ".greymatter", "memory_root"));
+  // 2. cwd/.the-brain/memory_root (file containing a path)
+  const override = readOverride(join(project, ".the-brain", "memory_root"));
   if (override) return override;
 
   // 3. env var
-  const env = process.env.GREYMATTER_MEMORY_DIR?.trim();
+  const env = process.env.BRAIN_MEMORY_DIR?.trim();
   if (env) return expandTilde(env);
 
-  // 4. ~/.greymatter/memory/
-  const userGlobal = join(homedir(), ".greymatter", "memory");
+  // 4. ~/.the-brain/memory/
+  const userGlobal = join(homedir(), ".the-brain", "memory");
   if (isDirectory(userGlobal)) return userGlobal;
 
   // 5. Legacy main-Io fallback

@@ -85,10 +85,10 @@ cpSync(
 
 // Plugin package.json — enumerate runtime deps only (no dev, no scripts)
 const pluginPkg = {
-  name: "greymatter-openclaw-plugin",
+  name: "the-brain-openclaw-plugin",
   version: rootPkg.version,
   description:
-    "OpenClaw context-engine plugin — greymatter. Prebuilt, self-contained.",
+    "OpenClaw context-engine plugin — the-brain. Prebuilt, self-contained.",
   type: "module",
   main: "src/index.js",
   dependencies: pickDeps(rootPkg.dependencies, ["openclaw"]),
@@ -159,7 +159,7 @@ if (existsSync(templatesSrc)) {
 
 // Hook pack package.json
 const hooksPkg = {
-  name: "greymatter-openclaw-hooks",
+  name: "the-brain-openclaw-hooks",
   version: rootPkg.version,
   description:
     "OpenClaw hook pack — observer, message-indexer, media-filer. Prebuilt, self-contained.",
@@ -252,10 +252,10 @@ if (existsSync(ccHooksSrc)) {
 // actually call at runtime (@google/genai for observe.sh's Node helpers,
 // qdrant/image/pdf bits for indexer/media-filer when they run under CC).
 const ccPkg = {
-  name: "greymatter-claude-code",
+  name: "the-brain-claude-code",
   version: rootPkg.version,
   description:
-    "greymatter Claude Code adapter — UserPromptSubmit/Stop/PreCompact hooks. Prebuilt, self-contained.",
+    "the-brain Claude Code adapter — UserPromptSubmit/Stop/PreCompact hooks. Prebuilt, self-contained.",
   type: "module",
   dependencies: pickDeps(rootPkg.dependencies, [
     "@google/genai",

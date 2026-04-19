@@ -7,7 +7,7 @@
 
 ## 1. The bug that surfaced this contract
 
-Greymatter's memory pipeline works like this:
+The Brain's memory pipeline works like this:
 
 ```
 Claude Code session (any cwd)
@@ -52,7 +52,7 @@ Both adapters therefore give the LLM an unambiguous signal. Any future adapter m
 
 ## 4. Template canonical location
 
-Source of truth: `templates/OBSERVATION-PROMPT.md` in the greymatter repo.
+Source of truth: `templates/OBSERVATION-PROMPT.md` in the the-brain repo.
 
 Build pipeline copies it to:
 
@@ -73,17 +73,17 @@ cp dist/claude-code/templates/OBSERVATION-PROMPT.md <agent-memory-dir>/OBSERVATI
 When `claude-io/<agent>/` worktrees are scaffolded (see [multi-agent architecture](#future-multi-agent-implications)), seeding should happen at agent-creation time as part of the bootstrap flow. Target helper:
 
 ```bash
-greymatter agent init <agent-name>
-# → creates ~/.greymatter/agents/<name>/memory/
+the-brain agent init <agent-name>
+# → creates ~/.the-brain/agents/<name>/memory/
 # → seeds OBSERVATION-PROMPT.md, OBSERVATION-PROMPT-NON-IO.md (if we split)
-# → writes <agent-worktree>/.greymatter/memory_root pointer
+# → writes <agent-worktree>/.the-brain/memory_root pointer
 ```
 
 ## 5. Future: multi-agent implications
 
-Once the multi-agent platform (`claude-io/<agent>/` worktrees + per-agent memory at `~/.greymatter/agents/<name>/`) is live, the identity model generalises:
+Once the multi-agent platform (`claude-io/<agent>/` worktrees + per-agent memory at `~/.the-brain/agents/<name>/`) is live, the identity model generalises:
 
-**Per-agent memory dirs resolve via tier 1 of `resolveMemoryDir()`**, so each agent's observations stay private to its own memory. Cross-contamination (the bug that motivated this spec) becomes structurally impossible — the feature3 session would resolve to `~/.greymatter/agents/feature3/memory/`, never touching Io's.
+**Per-agent memory dirs resolve via tier 1 of `resolveMemoryDir()`**, so each agent's observations stay private to its own memory. Cross-contamination (the bug that motivated this spec) becomes structurally impossible — the feature3 session would resolve to `~/.the-brain/agents/feature3/memory/`, never touching Io's.
 
 The master agent's role then becomes **promotion**: read each agent's reflections, decide what belongs in the shared `brain/` vault, commit on main. At no point does one agent's `<current-task>` leak into another's action queue.
 

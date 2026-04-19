@@ -67,9 +67,9 @@ const SESSIONS_DIR = join(
 // Resolve bundled shell scripts relative to this handler's install location.
 // At install time openclaw copies the hook pack dir (adapters/openclaw/hooks/)
 // to ~/.openclaw/hooks/<pack>/, so memory-tools/ travels with it.
-// Env override GREYMATTER_TOOLS_DIR lets development/CI point elsewhere.
+// Env override BRAIN_TOOLS_DIR lets development/CI point elsewhere.
 const TOOLS_DIR =
-  process.env.GREYMATTER_TOOLS_DIR ??
+  process.env.BRAIN_TOOLS_DIR ??
   fileURLToPath(new URL("../../memory-tools/", import.meta.url));
 const OBSERVE_SH = join(TOOLS_DIR, "observe.sh");
 const REFLECT_SH = join(TOOLS_DIR, "reflect.sh");

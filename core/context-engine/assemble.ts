@@ -1,5 +1,5 @@
 /**
- * Pure slicing function for the greymatter context engine.
+ * Pure slicing function for the the-brain context engine.
  *
  * Takes a full message array and returns a bounded tail that:
  * 1. Keeps the last `recentTurnCount` messages verbatim.
@@ -10,7 +10,7 @@
  * No I/O, no side effects, fully unit-testable.
  */
 
-import type { Message, GreymatterConfig } from "./types.js";
+import type { Message, TheBrainConfig } from "./types.js";
 
 /**
  * Check whether cutting at `idx` would split a tool-result from its
@@ -72,7 +72,7 @@ function splitsToolPair(messages: readonly Message[], idx: number): boolean {
  */
 export function sliceRecent(
   messages: readonly Message[],
-  cfg: Pick<GreymatterConfig, "recentTurnCount" | "preserveFirstUserMessage" | "minRawFloor">,
+  cfg: Pick<TheBrainConfig, "recentTurnCount" | "preserveFirstUserMessage" | "minRawFloor">,
 ): Message[] {
   const target = Math.max(cfg.recentTurnCount, cfg.minRawFloor);
 

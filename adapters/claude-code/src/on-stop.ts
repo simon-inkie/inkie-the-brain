@@ -1,5 +1,5 @@
 /**
- * greymatter — Claude Code Stop hook handler.
+ * the-brain — Claude Code Stop hook handler.
  *
  * Fires after each assistant turn. Delegates to observe-trigger with
  * force=false, so the cooldown + three-trigger OR logic from core/observer
@@ -73,14 +73,14 @@ async function main(): Promise<void> {
   }
   try {
     const result = await run(raw);
-    if (process.env.GREYMATTER_DEBUG === "1") {
+    if (process.env.BRAIN_DEBUG === "1") {
       console.error(
-        `[greymatter/on-stop] fired=${result.fired} reason=${result.reason}`,
+        `[the-brain/on-stop] fired=${result.fired} reason=${result.reason}`,
       );
     }
   } catch (err) {
-    if (process.env.GREYMATTER_DEBUG === "1") {
-      console.error(`[greymatter/on-stop] error: ${(err as Error).message}`);
+    if (process.env.BRAIN_DEBUG === "1") {
+      console.error(`[the-brain/on-stop] error: ${(err as Error).message}`);
     }
   }
   emit();

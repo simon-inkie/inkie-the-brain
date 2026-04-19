@@ -128,7 +128,7 @@ export async function runObservation(
       : "";
 
   const label = opts.label ?? "obs";
-  const tmpFile = `/tmp/gm-${label}-${Date.now()}-${process.pid}.txt`;
+  const tmpFile = `/tmp/tb-${label}-${Date.now()}-${process.pid}.txt`;
   try {
     writeFileSync(tmpFile, header + transcript);
   } catch (err) {
@@ -185,8 +185,8 @@ function formatTranscript(messages: TranscriptMessage[]): string {
 }
 
 function resolveToolsDir(): string {
-  if (process.env.GREYMATTER_TOOLS_DIR) {
-    return process.env.GREYMATTER_TOOLS_DIR;
+  if (process.env.BRAIN_TOOLS_DIR) {
+    return process.env.BRAIN_TOOLS_DIR;
   }
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     const candidate = join(process.env.CLAUDE_PLUGIN_ROOT, "memory-tools");

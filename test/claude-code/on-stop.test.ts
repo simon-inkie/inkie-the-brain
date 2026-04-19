@@ -53,7 +53,7 @@ describe("on-stop — run()", () => {
   beforeEach(() => {
     testDir = join(
       tmpdir(),
-      `gm-on-stop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `tb-on-stop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     memoryDir = join(testDir, "memory");
     mkdirSync(memoryDir, { recursive: true });
@@ -70,10 +70,10 @@ describe("on-stop — run()", () => {
     // Must be executable for spawn
     require("fs").chmodSync(join(toolsDir, "observe.sh"), 0o755);
 
-    process.env.GREYMATTER_TOOLS_DIR = toolsDir;
-    // Prevent resolver from finding a real ~/.greymatter/memory
-    process.env.GREYMATTER_MEMORY_DIR = memoryDir;
-    delete process.env.GREYMATTER_DEBUG;
+    process.env.BRAIN_TOOLS_DIR = toolsDir;
+    // Prevent resolver from finding a real ~/.the-brain/memory
+    process.env.BRAIN_MEMORY_DIR = memoryDir;
+    delete process.env.BRAIN_DEBUG;
   });
 
   afterEach(() => {
@@ -158,7 +158,7 @@ describe("on-stop — run()", () => {
     expect(fired).toBe(true);
     const log = readFileSync(observeLog, "utf-8");
     expect(log).toContain(`MEMORY_DIR=${memoryDir}`);
-    expect(log).toContain("file=/tmp/gm-obs-");
+    expect(log).toContain("file=/tmp/tb-obs-");
   });
 
   it("advances pointer after firing", async () => {
@@ -234,8 +234,8 @@ describe("on-stop — run()", () => {
 
 describe("sessionKeyFor", () => {
   it("slugifies the project dir and appends session id", () => {
-    expect(sessionKeyFor("/home/simon/io-projects/greymatter", "abc123")).toBe(
-      "cc:home-simon-io-projects-greymatter:abc123",
+    expect(sessionKeyFor("/home/simon/io-projects/the-brain", "abc123")).toBe(
+      "cc:home-simon-io-projects-the-brain:abc123",
     );
   });
 

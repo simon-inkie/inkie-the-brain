@@ -34,7 +34,7 @@ let refDir: string;
 let promptsDir: string;
 
 beforeEach(async () => {
-  testDir = join(tmpdir(), `greymatter-build-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  testDir = join(tmpdir(), `the-brain-build-ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   workspaceDir = testDir;
   memoryDir = join(testDir, "memory");
   toolsDir = join(memoryDir, "tools");
@@ -229,7 +229,7 @@ describe("build-context.sh", () => {
   });
 
   it("preserves content outside the anchor markers", async () => {
-    const headerContent = "# Simon's Memory\n\nThis is important non-live content.\n\n## Projects\n- Inkie\n- Greymatter\n";
+    const headerContent = "# Simon's Memory\n\nThis is important non-live content.\n\n## Projects\n- Inkie\n- The Brain\n";
     const footerContent = "\n## Notes\nSome trailing notes.\n";
     await writeMemoryMd(
       `${headerContent}<!-- IO_LIVE_START -->\nold live block\n<!-- IO_LIVE_END -->${footerContent}`,
@@ -242,7 +242,7 @@ describe("build-context.sh", () => {
     expect(result).toContain("This is important non-live content.");
     expect(result).toContain("Projects");
     expect(result).toContain("Inkie");
-    expect(result).toContain("Greymatter");
+    expect(result).toContain("The Brain");
     expect(result).toContain("Some trailing notes.");
     // Old block was replaced
     expect(result).not.toContain("old live block");

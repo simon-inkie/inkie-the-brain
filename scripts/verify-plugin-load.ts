@@ -24,7 +24,7 @@ function record(name: string, ok: boolean, detail: string) {
 
 record(
   "plugin entry shape",
-  pluginEntry.id === "greymatter" && typeof pluginEntry.register === "function",
+  pluginEntry.id === "the-brain" && typeof pluginEntry.register === "function",
   `id=${pluginEntry.id}, name=${pluginEntry.name}, register=${typeof pluginEntry.register}`,
 );
 
