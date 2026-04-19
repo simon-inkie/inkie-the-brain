@@ -18,6 +18,7 @@
     "context": "tsx cli/index.ts context",
     "cross-link": "tsx cli/index.ts cross-link",
     "assets": "tsx cli/index.ts assets",
+    "agent": "tsx cli/index.ts agent",
     "mcp": "tsx mcp/server.ts",
     "watch": "tsx daemon/watcher.ts"
   },

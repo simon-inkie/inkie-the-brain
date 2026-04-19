@@ -1,5 +1,8 @@
 import "../core/env.js";
-import { resolve } from "path";
+import { resolve, join, dirname } from "path";
+import { homedir } from "os";
+import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
+import { fileURLToPath } from "url";
 import { config } from "../core/config.js";
 import { indexAll, indexFile } from "../core/indexer/files.js";
 import { embedText } from "../core/embedder/text.js";
@@ -203,6 +206,96 @@ async function runAssets() {
   console.log(`\n${assets.length} assets indexed.`);
 }
 
+function runAgentInit() {
+  const sub = args[1];
+  if (sub !== "init") {
+    console.error('Usage: tsx cli/index.ts agent init <name> [--link <dir>]');
+    process.exit(1);
+  }
+
+  const name = args[2];
+  if (!name || name.startsWith("--")) {
+    console.error("agent init: missing <name> (e.g. voice-polish-bot)");
+    process.exit(1);
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) {
+    console.error(
+      `agent init: invalid name "${name}" — use alphanumeric + hyphens only`,
+    );
+    process.exit(1);
+  }
+
+  const linkFlag = args.indexOf("--link");
+  const linkDir =
+    linkFlag !== -1 && args[linkFlag + 1]
+      ? resolve(args[linkFlag + 1])
+      : undefined;
+
+  // repoRoot = two levels up from cli/index.ts
+  const here = fileURLToPath(import.meta.url);
+  const repoRoot = resolve(dirname(here), "..");
+  const templatesDir = join(repoRoot, "templates");
+  for (const f of ["OBSERVATION-PROMPT.md", "live-state.json", "MEMORY.md"]) {
+    if (!existsSync(join(templatesDir, f))) {
+      console.error(`agent init: template missing at ${join(templatesDir, f)}`);
+      process.exit(1);
+    }
+  }
+
+  const agentDir = join(homedir(), ".the-brain", "agents", name);
+  const memoryDir = join(agentDir, "memory");
+  if (existsSync(memoryDir)) {
+    console.error(
+      `agent init: ${memoryDir} already exists — refusing to overwrite`,
+    );
+    process.exit(1);
+  }
+
+  mkdirSync(join(memoryDir, "observations"), { recursive: true });
+  mkdirSync(join(memoryDir, "observer-pointers"), { recursive: true });
+  copyFileSync(
+    join(templatesDir, "OBSERVATION-PROMPT.md"),
+    join(memoryDir, "OBSERVATION-PROMPT.md"),
+  );
+  copyFileSync(
+    join(templatesDir, "live-state.json"),
+    join(memoryDir, "live-state.json"),
+  );
+  copyFileSync(join(templatesDir, "MEMORY.md"), join(agentDir, "MEMORY.md"));
+  writeFileSync(join(memoryDir, "observer-state.json"), "{}\n");
+
+  console.log(`✅ Created agent dir: ${agentDir}`);
+  console.log(`   memory/OBSERVATION-PROMPT.md  (observation contract)`);
+  console.log(`   memory/live-state.json        (era-compression state)`);
+  console.log(`   memory/observer-state.json    (bootstrap state)`);
+  console.log(`   memory/observations/          (empty)`);
+  console.log(`   memory/observer-pointers/     (empty)`);
+  console.log(`   MEMORY.md                     (live-block template)`);
+
+  if (linkDir) {
+    if (!existsSync(linkDir)) {
+      console.error(`--link: dir ${linkDir} does not exist`);
+      process.exit(1);
+    }
+    const pointerDir = join(linkDir, ".the-brain");
+    mkdirSync(pointerDir, { recursive: true });
+    writeFileSync(join(pointerDir, "memory_root"), memoryDir + "\n");
+    console.log(
+      `✅ Linked ${linkDir}/.the-brain/memory_root → ${memoryDir}`,
+    );
+    console.log(`   Add ".the-brain/" to ${linkDir}/.gitignore to keep the pointer local.`);
+  } else {
+    console.log();
+    console.log(`Next: link a worktree by running in it:`);
+    console.log(
+      `   tsx ${repoRoot}/cli/index.ts agent init ${name} --link .`,
+    );
+    console.log(
+      `(safe to re-run; already-created dirs are refused, but --link can be added.)`,
+    );
+  }
+}
+
 async function main() {
   switch (command) {
     case "index":
@@ -229,8 +322,11 @@ async function main() {
     case "assets":
       await runAssets();
       break;
+    case "agent":
+      runAgentInit();
+      break;
     default:
-      console.error("Usage: tsx src/cli.ts <command>");
+      console.error("Usage: tsx cli/index.ts <command>");
       console.error("  index [--file <path>]       Index all files or a single file");
       console.error('  search "query"              Semantic search');
       console.error("  stats                       Show collection statistics");
@@ -240,6 +336,7 @@ async function main() {
       console.error("  context <timestamp>         Show messages around a timestamp");
       console.error("  index-assets [--file <path>] Index images, PDFs, and audio");
       console.error("  assets                      List all indexed assets");
+      console.error("  agent init <name> [--link <dir>]  Create a new agent memory silo");
       process.exit(1);
   }
 }
