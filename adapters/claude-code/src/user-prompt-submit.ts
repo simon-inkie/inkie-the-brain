@@ -100,7 +100,27 @@ function parseMaxChars(raw: string | undefined): number | null {
 }
 
 export function wrapForInjection(block: string): string {
-  return `<the-brain>\n${block}\n</the-brain>`;
+  return `<the-brain>\n${nowLine()}\n${block}\n</the-brain>`;
+}
+
+export function nowLine(now: Date = new Date()): string {
+  // Local time with day name + UTC, refreshed every prompt. Authoritative for
+  // "now" — overrides any stale "Current time" line baked into MEMORY.md
+  // by the previous Stop hook.
+  const local = now.toLocaleString("en-GB", {
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+  const utc = now
+    .toISOString()
+    .slice(0, 16)
+    .replace("T", " ");
+  return `> **NOW: ${local} (UTC ${utc})** — this is the current moment. Treat all timestamps below as historical unless they carry this same date.`;
 }
 
 async function main(): Promise<void> {
