@@ -33,8 +33,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_log.sh
+source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+
+export BRAIN_COMPONENT="compress-era.sh"
+
 MEMORY_DIR="${MEMORY_DIR:-$(dirname "$SCRIPT_DIR")}"
 ERA_FILE="$MEMORY_DIR/era-summary.md"
+
+log info "enter" "{\"memoryDir\":\"$MEMORY_DIR\"}"
 META_FILE="$MEMORY_DIR/era-summary.meta.json"
 PROMPTS_DIR="$MEMORY_DIR/prompts"
 

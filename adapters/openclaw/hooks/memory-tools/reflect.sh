@@ -10,12 +10,17 @@ set -e
 export PATH="$HOME/.local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_log.sh
+source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+
 MEMORY_DIR="${MEMORY_DIR:-$(dirname "$SCRIPT_DIR")}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$(dirname "$MEMORY_DIR")}"
 OBS_DIR="$MEMORY_DIR/observations"
 REF_DIR="$MEMORY_DIR/reflections"
 STATE_FILE="$MEMORY_DIR/observer-state.json"
 PROMPT_FILE="$MEMORY_DIR/REFLECTION-PROMPT.md"
+
+log info "enter" "{\"memoryDir\":\"$MEMORY_DIR\"}"
 
 # Parse compression level argument
 LEVEL=0
@@ -35,10 +40,12 @@ UNPROCESSED=$(jq -r '.unprocessedObservationCount // 0' "$STATE_FILE" 2>/dev/nul
 
 if [ "$UNPROCESSED" -eq 0 ]; then
     echo "No unprocessed observations. Nothing to reflect on."
+    log info "exit" "{\"status\":\"nothing-to-do\"}"
     exit 0
 fi
 
 echo "🔮 Reflecting on $UNPROCESSED unprocessed observations (compression level: $LEVEL)..."
+log info "observations-collated" "{\"unprocessed\":$UNPROCESSED,\"level\":$LEVEL}"
 
 # Gather all observation files, sorted by name (chronological)
 # Read the last N observation files based on unprocessed count
@@ -99,12 +106,15 @@ TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 OUTPUT_FILE="$REF_DIR/$TIMESTAMP.md"
 
 echo "🧠 Running reflection..."
+log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
 RESULT=$(echo "$FULL_PROMPT" | claude --print --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
 
 if [ -z "$RESULT" ]; then
+    log error "claude-call-failed" "{\"reason\":\"empty-result\"}"
     echo "Error: Claude returned empty result"
     exit 1
 fi
+log info "claude-call-ok" "{\"resultChars\":${#RESULT}}"
 
 # Write reflection file
 cat > "$OUTPUT_FILE" << EOF
@@ -116,6 +126,7 @@ $RESULT
 EOF
 
 echo "✅ Reflection written to: $OUTPUT_FILE"
+log info "reflection-written" "{\"path\":\"$OUTPUT_FILE\",\"chars\":$(wc -c < "$OUTPUT_FILE"),\"sourceObservations\":$COUNT}"
 
 # Update observer-state.json
 jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
@@ -124,6 +135,7 @@ jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
    "$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 
 echo "📊 State updated: unprocessed count reset to 0"
+log info "state-reset" "{}"
 
 # Rebuild current-context.md
 bash "$SCRIPT_DIR/build-context.sh"
@@ -133,3 +145,4 @@ cd ~/io-projects/io-memory && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.en
 
 echo ""
 echo "Review the reflection and merge notable items into MEMORY.md"
+log info "exit" "{\"status\":\"ok\"}"

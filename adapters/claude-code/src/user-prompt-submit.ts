@@ -29,6 +29,7 @@ try {
 
 import { readInjectedMemoryBlock } from "../../../core/context-engine/memory-reader.js";
 import { resolveMemoryDir, memoryFilePath } from "./memory-root.js";
+import { log, makeTraceId } from "../../../core/log.js";
 
 interface HookInput {
   session_id?: string;
@@ -81,6 +82,8 @@ export async function run(rawInput: string): Promise<string> {
     parseMaxChars(process.env.BRAIN_MAX_INJECTED_CHARS) ??
     MAX_INJECTED_CHARS_DEFAULT;
 
+  const traceId = makeTraceId(input.session_id);
+
   const block = await readInjectedMemoryBlock({
     memoryBlockSource: "file",
     memoryFile: memFile,
@@ -88,7 +91,22 @@ export async function run(rawInput: string): Promise<string> {
     debug: process.env.BRAIN_DEBUG === "1",
   });
 
-  if (!block.trim()) return "";
+  if (!block.trim()) {
+    log("warn", "user-prompt-submit", "empty-block", {
+      cwd: projectDir,
+      sessionId: input.session_id,
+      memoryDir,
+      data: { memFile },
+    }, traceId);
+    return "";
+  }
+
+  log("info", "user-prompt-submit", "hook-fired", {
+    cwd: projectDir,
+    sessionId: input.session_id,
+    memoryDir,
+    data: { blockChars: block.length, maxChars },
+  }, traceId);
 
   return wrapForInjection(block);
 }

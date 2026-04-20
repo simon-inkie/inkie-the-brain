@@ -5,11 +5,11 @@
  * before compaction destroys detail) funnel through `runObservation()`.
  */
 
-import { existsSync, mkdirSync, writeFileSync, statSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { log, makeTraceId } from "../../../core/log.js";
 
 import {
   evaluateShouldObserve,
@@ -48,32 +48,33 @@ export function sessionKeyFor(projectDir: string, sessionId: string): string {
   return `cc:${slug}:${sessionId}`;
 }
 
-function logHookActivity(entry: Record<string, unknown>): void {
-  try {
-    const logDir = join(homedir(), ".the-brain", "logs");
-    mkdirSync(logDir, { recursive: true });
-    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n";
-    appendFileSync(join(logDir, "hook-activity.jsonl"), line);
-  } catch {
-    /* logging is best-effort, never block the hook */
-  }
-}
 
 export async function runObservation(
   input: HookInput,
   opts: TriggerOptions,
 ): Promise<TriggerResult> {
+  const traceId = makeTraceId(input.session_id);
+  // Stash on opts so inner fn + spawned bash can reuse the same id.
+  (opts as TriggerOptions & { traceId: string }).traceId = traceId;
   const result = await runObservationInner(input, opts);
-  logHookActivity({
-    event: input.hook_event_name ?? "?",
-    label: opts.label ?? "obs",
-    force: opts.force,
-    cwd: input.cwd,
-    sessionId: input.session_id,
-    transcriptPath: input.transcript_path,
-    fired: result.fired,
-    reason: result.reason,
-  });
+  log(
+    result.fired ? "info" : "warn",
+    "observe-trigger",
+    "hook-fired",
+    {
+      cwd: input.cwd,
+      sessionId: input.session_id,
+      data: {
+        event: input.hook_event_name ?? "?",
+        label: opts.label ?? "obs",
+        force: opts.force,
+        transcriptPath: input.transcript_path,
+        fired: result.fired,
+        reason: result.reason,
+      },
+    },
+    traceId,
+  );
   return result;
 }
 
@@ -175,11 +176,19 @@ async function runObservationInner(
     return { fired: false, reason: `observe.sh not found at ${observeSh}` };
   }
 
+  const traceId =
+    (opts as TriggerOptions & { traceId?: string }).traceId ?? makeTraceId(input.session_id);
   try {
     mkdirSync(memoryDir, { recursive: true });
     const child = spawn("bash", [observeSh, "--file", tmpFile], {
       cwd: dirname(memoryDir),
-      env: { ...process.env, MEMORY_DIR: memoryDir, AUTO_REFLECT: "1" },
+      env: {
+        ...process.env,
+        MEMORY_DIR: memoryDir,
+        AUTO_REFLECT: "1",
+        BRAIN_TRACE_ID: traceId,
+        BRAIN_COMPONENT: "observe.sh",
+      },
       detached: true,
       stdio: "ignore",
     });

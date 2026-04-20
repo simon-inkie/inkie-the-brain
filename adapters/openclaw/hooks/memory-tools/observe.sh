@@ -12,11 +12,16 @@ set -e
 export PATH="$HOME/.local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_log.sh
+source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+
 MEMORY_DIR="${MEMORY_DIR:-$(dirname "$SCRIPT_DIR")}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$(dirname "$MEMORY_DIR")}"
 OBS_DIR="$MEMORY_DIR/observations"
 STATE_FILE="$MEMORY_DIR/observer-state.json"
 PROMPT_FILE="$MEMORY_DIR/OBSERVATION-PROMPT.md"
+
+log info "enter" "{\"memoryDir\":\"$MEMORY_DIR\",\"autoReflect\":\"${AUTO_REFLECT:-0}\"}"
 
 # Ensure directories exist
 mkdir -p "$OBS_DIR"
@@ -25,7 +30,10 @@ mkdir -p "$OBS_DIR"
 # create the file from nothing. Without this the first observation leaves
 # a 0-byte .tmp and unprocessedObservationCount stays stuck at 1 forever,
 # so AUTO_REFLECT thresholds never cross.
-[ -f "$STATE_FILE" ] || echo '{}' > "$STATE_FILE"
+if [ ! -f "$STATE_FILE" ]; then
+  echo '{}' > "$STATE_FILE"
+  log info "bootstrap-state" "{\"path\":\"$STATE_FILE\"}"
+fi
 
 # Get conversation input
 if [ "$1" = "--file" ] && [ -n "$2" ]; then
@@ -73,12 +81,15 @@ Output your observations using the XML format specified. Include <observations>,
 # Call Claude with the observation prompt
 # Uses claude CLI in print mode with a fast model
 echo "🔬 Running observation pass..."
+log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
 RESULT=$(echo "$FULL_PROMPT" | claude --print --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
 
 if [ -z "$RESULT" ]; then
+    log error "claude-call-failed" "{\"reason\":\"empty-result\"}"
     echo "Error: Claude returned empty result"
     exit 1
 fi
+log info "claude-call-ok" "{\"resultChars\":${#RESULT}}"
 
 # Extract the observation content and convert XML to markdown
 # Keep the XML structure but wrap in a markdown file with metadata header
@@ -91,6 +102,7 @@ $RESULT
 EOF
 
 echo "✅ Observation written to: $OUTPUT_FILE"
+log info "observation-written" "{\"path\":\"$OUTPUT_FILE\",\"chars\":$(wc -c < "$OUTPUT_FILE")}"
 
 # Update observer-state.json
 CURRENT_COUNT=$(jq -r '.unprocessedObservationCount // 0' "$STATE_FILE" 2>/dev/null || echo "0")
@@ -126,10 +138,14 @@ CHAR_THRESHOLD=$(jq -r '.reflectionCharThreshold // 8000' "$STATE_FILE" 2>/dev/n
 if [ "$NEW_COUNT" -ge "$COUNT_THRESHOLD" ] || [ "$NEW_CHARS" -ge "$CHAR_THRESHOLD" ]; then
     echo ""
     echo "⚡ Reflection threshold reached (count: $NEW_COUNT/$COUNT_THRESHOLD, chars: $NEW_CHARS/$CHAR_THRESHOLD)"
+    log info "threshold-cross" "{\"newCount\":$NEW_COUNT,\"countThreshold\":$COUNT_THRESHOLD,\"newChars\":$NEW_CHARS,\"charThreshold\":$CHAR_THRESHOLD,\"autoReflect\":\"${AUTO_REFLECT:-0}\"}"
     if [ "${AUTO_REFLECT:-0}" = "1" ]; then
         echo "   AUTO_REFLECT=1 → chaining reflect.sh"
+        log info "exit" "{\"status\":\"chaining-reflect\"}"
+        export BRAIN_COMPONENT="reflect.sh"
         exec bash "$SCRIPT_DIR/reflect.sh"
     else
         echo "   Run: memory/tools/reflect.sh"
     fi
 fi
+log info "exit" "{\"status\":\"ok\",\"newCount\":$NEW_COUNT}"

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import { resolve, join, basename } from "path";
 import { homedir } from "os";
+import { log } from "../../../core/log.js";
 
 /**
  * Resolve the memory directory for a given Claude Code project.
@@ -23,25 +24,46 @@ import { homedir } from "os";
  */
 export function resolveMemoryDir(projectDir: string): string {
   const project = resolve(projectDir);
+  const result = resolveMemoryDirInner(project);
+  log("debug", "memory-root", "resolved", {
+    cwd: project,
+    memoryDir: result.memoryDir,
+    data: { tier: result.tier },
+  });
+  if (result.tier === 5) {
+    // Auto-silo means no explicit pointer — flag as warn so it's grep-able
+    // when an agent's expected silo isn't being hit.
+    log("warn", "memory-root", "auto-silo-fallback", {
+      cwd: project,
+      memoryDir: result.memoryDir,
+      data: { tier: 5, basename: basename(project) },
+    });
+  }
+  return result.memoryDir;
+}
 
+function resolveMemoryDirInner(project: string): { memoryDir: string; tier: number } {
   // 1. cwd/memory/
   const localMemory = join(project, "memory");
-  if (isDirectory(localMemory)) return localMemory;
+  if (isDirectory(localMemory)) return { memoryDir: localMemory, tier: 1 };
 
   // 2. cwd/.the-brain/memory_root (file containing a path)
   const override = readOverride(join(project, ".the-brain", "memory_root"));
-  if (override) return override;
+  if (override) return { memoryDir: override, tier: 2 };
 
   // 3. env var
   const env = process.env.BRAIN_MEMORY_DIR?.trim();
-  if (env) return expandTilde(env);
+  if (env) return { memoryDir: expandTilde(env), tier: 3 };
 
   // 4. ~/.the-brain/memory/
   const userGlobal = join(homedir(), ".the-brain", "memory");
-  if (isDirectory(userGlobal)) return userGlobal;
+  if (isDirectory(userGlobal)) return { memoryDir: userGlobal, tier: 4 };
 
   // 5. Auto-silo per project under ~/.the-brain/agents/<basename>/memory/
-  return join(homedir(), ".the-brain", "agents", basename(project), "memory");
+  return {
+    memoryDir: join(homedir(), ".the-brain", "agents", basename(project), "memory"),
+    tier: 5,
+  };
 }
 
 /**
