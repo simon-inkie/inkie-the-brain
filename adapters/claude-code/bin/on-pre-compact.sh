@@ -5,6 +5,7 @@
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+export CLAUDE_PLUGIN_ROOT
 
 for cand in \
   "${CLAUDE_PLUGIN_ROOT}/on-pre-compact.js" \

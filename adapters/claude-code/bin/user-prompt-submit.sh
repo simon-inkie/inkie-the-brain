@@ -8,6 +8,7 @@ set -u
 # CLAUDE_PLUGIN_ROOT is set by Claude Code when installed as a plugin.
 # When invoked directly from settings.json, derive root from this script.
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+export CLAUDE_PLUGIN_ROOT
 
 # Candidate layouts, probed in order:
 #   1. <root>/user-prompt-submit.js          — bundled flat layout (dist/claude-code/)

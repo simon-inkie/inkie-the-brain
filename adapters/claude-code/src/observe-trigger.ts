@@ -5,10 +5,11 @@
  * before compaction destroys detail) funnel through `runObservation()`.
  */
 
-import { existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, statSync, appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 import {
   evaluateShouldObserve,
@@ -47,7 +48,36 @@ export function sessionKeyFor(projectDir: string, sessionId: string): string {
   return `cc:${slug}:${sessionId}`;
 }
 
+function logHookActivity(entry: Record<string, unknown>): void {
+  try {
+    const logDir = join(homedir(), ".the-brain", "logs");
+    mkdirSync(logDir, { recursive: true });
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n";
+    appendFileSync(join(logDir, "hook-activity.jsonl"), line);
+  } catch {
+    /* logging is best-effort, never block the hook */
+  }
+}
+
 export async function runObservation(
+  input: HookInput,
+  opts: TriggerOptions,
+): Promise<TriggerResult> {
+  const result = await runObservationInner(input, opts);
+  logHookActivity({
+    event: input.hook_event_name ?? "?",
+    label: opts.label ?? "obs",
+    force: opts.force,
+    cwd: input.cwd,
+    sessionId: input.session_id,
+    transcriptPath: input.transcript_path,
+    fired: result.fired,
+    reason: result.reason,
+  });
+  return result;
+}
+
+async function runObservationInner(
   input: HookInput,
   opts: TriggerOptions,
 ): Promise<TriggerResult> {
@@ -107,11 +137,12 @@ export async function runObservation(
   if (messages.length === 0) {
     pointer.lastObservedOffset = newOffset;
     savePointer(pointersDir, pointer);
+    const detail = `oldOffset=${pointer.lastObservedOffset}, newOffset=${newOffset}, msgs=0`;
     return {
       fired: false,
       reason: opts.force
-        ? "force-fire: no unobserved content"
-        : "no substantive messages in delta",
+        ? `force-fire: no unobserved content (${detail})`
+        : `no substantive messages in delta (${detail})`,
     };
   }
 
