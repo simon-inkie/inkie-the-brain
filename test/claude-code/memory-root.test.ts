@@ -10,6 +10,7 @@ import {
 describe("resolveMemoryDir", () => {
   let testDir: string;
   const prevEnv = process.env.BRAIN_MEMORY_DIR;
+  const prevAgent = process.env.AGENT_NAME;
 
   beforeEach(() => {
     testDir = join(
@@ -18,17 +19,78 @@ describe("resolveMemoryDir", () => {
     );
     mkdirSync(testDir, { recursive: true });
     delete process.env.BRAIN_MEMORY_DIR;
+    delete process.env.AGENT_NAME;
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
     if (prevEnv === undefined) delete process.env.BRAIN_MEMORY_DIR;
     else process.env.BRAIN_MEMORY_DIR = prevEnv;
+    if (prevAgent === undefined) delete process.env.AGENT_NAME;
+    else process.env.AGENT_NAME = prevAgent;
   });
 
   it("prefers projectDir/memory/ when present", () => {
     mkdirSync(join(testDir, "memory"));
     expect(resolveMemoryDir(testDir)).toBe(join(testDir, "memory"));
+  });
+
+  describe("AGENT_NAME override (tier 0)", () => {
+    it("wins over every lower tier", () => {
+      // Set up conditions for tiers 1, 2, 3 to all exist
+      mkdirSync(join(testDir, "memory"));
+      mkdirSync(join(testDir, ".the-brain"), { recursive: true });
+      writeFileSync(
+        join(testDir, ".the-brain", "memory_root"),
+        "/tmp/wrong-tier2",
+      );
+      process.env.BRAIN_MEMORY_DIR = "/tmp/wrong-tier3";
+      process.env.AGENT_NAME = "brain-surgeon";
+      expect(resolveMemoryDir(testDir)).toBe(
+        join(homedir(), ".the-brain", "agents", "brain-surgeon", "memory"),
+      );
+    });
+
+    it("accepts hyphenated names", () => {
+      process.env.AGENT_NAME = "brain-surgeon";
+      expect(resolveMemoryDir(testDir)).toBe(
+        join(homedir(), ".the-brain", "agents", "brain-surgeon", "memory"),
+      );
+    });
+
+    it("accepts names with digits", () => {
+      process.env.AGENT_NAME = "agent42";
+      expect(resolveMemoryDir(testDir)).toBe(
+        join(homedir(), ".the-brain", "agents", "agent42", "memory"),
+      );
+    });
+
+    it("falls through on empty/whitespace AGENT_NAME", () => {
+      process.env.AGENT_NAME = "   ";
+      // Falls through to tier 5 (auto-silo by basename)
+      const result = resolveMemoryDir(testDir);
+      expect(result).toContain("/agents/");
+      expect(result).not.toContain("/agents//");
+    });
+
+    it("falls through on invalid AGENT_NAME (path traversal)", () => {
+      // Security: don't let "../evil" become a directory escape
+      process.env.AGENT_NAME = "../evil";
+      const result = resolveMemoryDir(testDir);
+      expect(result).not.toContain("evil");
+    });
+
+    it("falls through on invalid AGENT_NAME (slashes)", () => {
+      process.env.AGENT_NAME = "foo/bar";
+      const result = resolveMemoryDir(testDir);
+      expect(result).not.toContain("foo/bar");
+    });
+
+    it("falls through on invalid AGENT_NAME (spaces)", () => {
+      process.env.AGENT_NAME = "has spaces";
+      const result = resolveMemoryDir(testDir);
+      expect(result).not.toContain("has spaces");
+    });
   });
 
   it("falls through to override file when no local memory/", () => {

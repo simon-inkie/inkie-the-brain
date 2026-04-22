@@ -56,6 +56,11 @@ export function log(
       component,
       event,
     };
+    // Carry persona identity on every trace line so a session-wide
+    // `grep '"agentName":"brain-surgeon"' hook-activity.jsonl` filters to
+    // just that persona's activity across all components.
+    const agentName = process.env.AGENT_NAME?.trim();
+    if (agentName) entry.agentName = agentName;
     if (extras.cwd) entry.cwd = extras.cwd;
     if (extras.sessionId) entry.sessionId = extras.sessionId;
     if (extras.memoryDir) entry.memoryDir = extras.memoryDir;

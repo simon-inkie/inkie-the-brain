@@ -38,7 +38,14 @@ log() {
   local trace="${BRAIN_TRACE_ID:-none:$(date +%s%3N 2>/dev/null || date +%s)}"
   local component="${BRAIN_COMPONENT:-${BASH_SOURCE[1]##*/}}"
 
-  printf '{"ts":"%s","level":"%s","traceId":"%s","component":"%s","event":"%s","data":%s}\n' \
-    "$ts" "$level" "$trace" "$component" "$event" "$data" \
+  # Inline persona identity if AGENT_NAME is set — mirrors the TS helper so
+  # a session-wide grep '"agentName":"brain-surgeon"' catches all components.
+  local agent_field=""
+  if [ -n "${AGENT_NAME:-}" ]; then
+    agent_field=",\"agentName\":\"${AGENT_NAME}\""
+  fi
+
+  printf '{"ts":"%s","level":"%s","traceId":"%s","component":"%s","event":"%s"%s,"data":%s}\n' \
+    "$ts" "$level" "$trace" "$component" "$event" "$agent_field" "$data" \
     >> "$logdir/hook-activity.jsonl" 2>/dev/null || true
 }
