@@ -16,7 +16,6 @@
   "include": [
     "core/**/*.ts",
     "adapters/**/*.ts",
-    "mcp/**/*.ts",
     "daemon/**/*.ts",
     "cli/**/*.ts",
     "test/**/*.ts"

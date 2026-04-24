@@ -10,6 +10,7 @@ import { ensureCollections, getCollectionPointCount } from "../core/qdrant/clien
 import { relative } from "path";
 import { startMediaFilerWatcher } from "../core/media-filer/index.js";
 import { crossLinkFile } from "../core/cross-linker/index.js";
+import { detectCollection } from "../core/indexer/collection-router.js";
 
 const DEBOUNCE_MS = 2000;
 const ASSET_DEBOUNCE_MS = 5000;
@@ -39,13 +40,8 @@ function relativePath(filePath: string): string {
   return relative(config.workspaceRoot, filePath);
 }
 
-function detectCollection(filePath: string): string | null {
-  const rel = relativePath(filePath);
-  if (rel.startsWith("brain/")) return config.collections.brain;
-  if (rel.startsWith("memory/observations")) return config.collections.observations;
-  if (rel.startsWith("memory/reflections") || rel === "MEMORY.md") return config.collections.reflections;
-  return null;
-}
+// Collection routing moved to collection-router.ts so watcher + indexer
+// share the same absolute-path logic.
 
 function handleFileChange(filePath: string): void {
   // Clear existing timer for this file
@@ -265,11 +261,18 @@ async function main(): Promise<void> {
     ...config.sources.observations,
     ...config.sources.reflections,
     ...config.sources.assets,
-    config.memoryMdPath,
+    ...config.memoryMdPaths,
+    ...config.personaWatchPaths,
   ];
 
   log("Starting file watcher...");
-  log(`Watching: ${watchPaths.join(", ")}`);
+  log(
+    `Discovered ${config.agents.length} agent(s): ${
+      config.agents.map((a) => a.name).join(", ") || "(none)"
+    }`,
+  );
+  log(`Watching ${watchPaths.length} paths:`);
+  for (const p of watchPaths) log(`  - ${p}`);
 
   const watcher = watch(watchPaths, {
     ignoreInitial: true,

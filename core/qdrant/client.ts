@@ -13,7 +13,6 @@ function pointId(collection: string, sourcePath: string, chunkIndex: number): st
   const hash = createHash("sha256")
     .update(`${collection}:${sourcePath}:${chunkIndex}`)
     .digest("hex");
-  // Qdrant accepts UUIDs or unsigned integers. We'll use a UUID-like format from the hash.
   return [
     hash.slice(0, 8),
     hash.slice(8, 12),
@@ -38,6 +37,38 @@ export async function ensureCollections(): Promise<void> {
       console.error(`Created collection: ${name}`);
     }
   }
+
+  for (const coll of [
+    config.collections.observations,
+    config.collections.reflections,
+  ]) {
+    await ensurePayloadIndex(coll, "agentName", "keyword");
+  }
+}
+
+export async function ensurePayloadIndex(
+  collection: string,
+  field: string,
+  schema: "keyword" | "integer" | "float" | "geo" | "text" | "bool",
+): Promise<void> {
+  try {
+    await client.createPayloadIndex(collection, {
+      field_name: field,
+      field_schema: schema,
+      wait: true,
+    });
+    console.error(`Created payload index: ${collection}.${field} (${schema})`);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      msg.includes("already exists") ||
+      msg.includes("not found") ||
+      msg.toLowerCase().includes("index for field")
+    ) {
+      return;
+    }
+    throw e;
+  }
 }
 
 export interface PointData {
@@ -51,6 +82,7 @@ export interface PointData {
   indexedAt: string;
   tags: string[];
   date: string | null;
+  agentName: string | null;
 }
 
 export async function upsertPoints(
@@ -77,20 +109,33 @@ export interface SearchResult {
   content: string;
   tags: string[];
   date: string | null;
-  // Asset-specific fields
   assetType?: string;
   mimeType?: string;
   description?: string;
   transcript?: string;
 }
 
+export interface SearchFilter {
+  agentNames?: string[];
+}
+
 export async function search(
   collections: string[],
   queryVector: number[],
   limit: number,
-  scoreThreshold: number
+  scoreThreshold: number,
+  filter?: SearchFilter,
 ): Promise<SearchResult[]> {
   const allResults: SearchResult[] = [];
+
+  const qdrantFilter =
+    filter?.agentNames && filter.agentNames.length > 0
+      ? {
+          must: [
+            { key: "agentName", match: { any: filter.agentNames } },
+          ],
+        }
+      : undefined;
 
   for (const collection of collections) {
     try {
@@ -99,6 +144,7 @@ export async function search(
         limit,
         with_payload: true,
         score_threshold: scoreThreshold,
+        ...(qdrantFilter ? { filter: qdrantFilter } : {}),
       });
 
       for (const r of results) {
@@ -112,7 +158,6 @@ export async function search(
           tags: (p.tags as string[]) ?? [],
           date: (p.date as string | null) ?? (p.timestamp as string | null) ?? null,
         };
-        // Include asset-specific fields if present
         if (p.assetType) result.assetType = p.assetType as string;
         if (p.mimeType) result.mimeType = p.mimeType as string;
         if (p.description) result.description = p.description as string;
@@ -121,13 +166,11 @@ export async function search(
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Collection might not exist yet — skip gracefully
       if (msg.includes("not found")) continue;
       throw e;
     }
   }
 
-  // Sort by score descending, take top `limit`
   allResults.sort((a, b) => b.score - a.score);
   return allResults.slice(0, limit);
 }
@@ -144,10 +187,6 @@ export async function deleteBySource(
   });
 }
 
-/**
- * Return the current point count for a collection. Returns 0 if the
- * collection doesn't exist. Used by indexer drift detection.
- */
 export async function getCollectionPointCount(
   collection: string
 ): Promise<number> {

@@ -5,6 +5,7 @@ import { glob } from "glob";
 import matter from "gray-matter";
 import { config } from "../config.js";
 import { embedTexts } from "../embedder/text.js";
+import { detectCollection, agentNameFromPath } from "./collection-router.js";
 import {
   ensureCollections,
   upsertPoints,
@@ -223,6 +224,11 @@ async function indexFileInternal(
   // Extract origin metadata if present
   const origin = frontmatter.origin ?? null;
 
+  // Derive agent name from the absolute path. Null for brain-vault and any
+  // path without an `agents/<name>/` segment — scope-filtered queries skip
+  // those points.
+  const agentName = agentNameFromPath(filePath);
+
   // Build points
   const points: { vector: number[]; payload: PointData }[] = chunks.map(
     (chunk, i) => ({
@@ -237,6 +243,7 @@ async function indexFileInternal(
         indexedAt: new Date().toISOString(),
         tags,
         date,
+        agentName,
         ...(origin ? { origin } : {}),
       },
     })
@@ -290,14 +297,23 @@ async function indexMemoryMd(
   state: IndexState
 ): Promise<{ chunks: number; skipped: boolean }> {
   const collection = config.collections.reflections;
+  const paths = config.memoryMdPaths.length > 0
+    ? config.memoryMdPaths
+    : [config.memoryMdPath];
 
-  try {
-    await access(config.memoryMdPath);
-  } catch {
-    return { chunks: 0, skipped: true };
+  let totalChunks = 0;
+  let anyIndexed = false;
+  for (const p of paths) {
+    try {
+      await access(p);
+    } catch {
+      continue;
+    }
+    const r = await indexFileInternal(p, collection, state);
+    totalChunks += r.chunks;
+    if (!r.skipped) anyIndexed = true;
   }
-
-  return indexFileInternal(config.memoryMdPath, collection, state);
+  return { chunks: totalChunks, skipped: !anyIndexed };
 }
 
 async function cleanRemovedFiles(state: IndexState): Promise<number> {
@@ -389,19 +405,10 @@ export async function indexFile(filePath: string): Promise<void> {
   await ensureCollections();
   const state = await loadState();
 
-  // Determine collection from path
+  // Determine collection via shared router (absolute-path substring match —
+  // handles per-agent silos as well as legacy OpenClaw paths).
   const relPath = relativePath(filePath);
-  let collection: string;
-  if (relPath.startsWith("brain/")) {
-    collection = config.collections.brain;
-  } else if (relPath.startsWith("memory/observations")) {
-    collection = config.collections.observations;
-  } else if (relPath.startsWith("memory/reflections") || relPath === "MEMORY.md") {
-    collection = config.collections.reflections;
-  } else {
-    // Default to brain
-    collection = config.collections.brain;
-  }
+  const collection = detectCollection(filePath) ?? config.collections.brain;
 
   const result = await indexFileInternal(filePath, collection, state);
   await saveState(state);

@@ -25,18 +25,43 @@ async function runIndex() {
 }
 
 async function runSearch() {
-  const query = args.slice(1).filter((a) => !a.startsWith("--")).join(" ");
+  const tokens = args.slice(1);
+  const consumed = new Set<number>();
+  function flagValue(name: string): string | undefined {
+    const i = tokens.indexOf(name);
+    if (i === -1) return undefined;
+    consumed.add(i);
+    consumed.add(i + 1);
+    return tokens[i + 1];
+  }
+  const collectionFlag = flagValue("--collection");
+  const agentsFlag = flagValue("--agents");
+  const query = tokens
+    .filter((_, i) => !consumed.has(i) && !tokens[i].startsWith("--"))
+    .join(" ");
   if (!query) {
-    console.error("Usage: tsx src/cli.ts search \"your query\" [--collection name]");
+    console.error(
+      'Usage: tsx cli/index.ts search "your query" [--collection name] [--agents name1,name2,__own__]',
+    );
     process.exit(1);
   }
 
-  const collFlag = args.indexOf("--collection");
   const allCollections = Object.values(config.collections);
-  const collections =
-    collFlag !== -1 && args[collFlag + 1]
-      ? [args[collFlag + 1]]
-      : allCollections;
+  const collections = collectionFlag ? [collectionFlag] : allCollections;
+
+  const agents = agentsFlag
+    ? agentsFlag
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .flatMap((a) =>
+          a === "__own__"
+            ? process.env.AGENT_NAME
+              ? [process.env.AGENT_NAME]
+              : []
+            : [a],
+        )
+    : undefined;
 
   await ensureCollections();
   const queryVector = await embedText(query, "RETRIEVAL_QUERY");
@@ -44,7 +69,8 @@ async function runSearch() {
     collections,
     queryVector,
     config.searchDefaults.limit,
-    config.searchDefaults.scoreThreshold
+    config.searchDefaults.scoreThreshold,
+    agents && agents.length > 0 ? { agentNames: agents } : undefined,
   );
 
   if (results.length === 0) {
@@ -72,7 +98,7 @@ async function runStats() {
   await ensureCollections();
   const allCollections = Object.values(config.collections);
 
-  console.log("io-memory collection stats:\n");
+  console.log("the-brain collection stats:\n");
   for (const name of allCollections) {
     try {
       const info = await client.getCollection(name);
@@ -328,7 +354,7 @@ async function main() {
     default:
       console.error("Usage: tsx cli/index.ts <command>");
       console.error("  index [--file <path>]       Index all files or a single file");
-      console.error('  search "query"              Semantic search');
+      console.error('  search "query" [--agents a,b,__own__]  Semantic search');
       console.error("  stats                       Show collection statistics");
       console.error("  cross-link <file>           Cross-link observation to brain files");
       console.error("  cross-link --all            Cross-link all observations");

@@ -5,6 +5,7 @@ import { glob } from "glob";
 import { imageSize } from "image-size";
 import { config } from "../config.js";
 import { embedText } from "../embedder/text.js";
+import { agentNameFromPath } from "./collection-router.js";
 import {
   ensureCollections,
   upsertPoints,
@@ -190,6 +191,7 @@ async function indexImage(
     indexedAt: new Date().toISOString(),
     tags: tagsFromPath(filePath),
     date: extractDateFromFilename(filePath),
+    agentName: agentNameFromPath(filePath),
     assetType: "image",
     mimeType: getMimeType(filePath),
     description,
@@ -264,6 +266,7 @@ async function indexPdf(
           indexedAt: new Date().toISOString(),
           tags: tagsFromPath(filePath),
           date: extractDateFromFilename(filePath),
+          agentName: agentNameFromPath(filePath),
           assetType: "pdf",
           mimeType: "application/pdf",
           description: `PDF document: ${title} (${totalPages} pages, multimodal)`,
@@ -308,6 +311,7 @@ async function indexPdf(
           indexedAt: new Date().toISOString(),
           tags: tagsFromPath(filePath),
           date: extractDateFromFilename(filePath),
+          agentName: agentNameFromPath(filePath),
           assetType: "pdf",
           mimeType: "application/pdf",
           description: `PDF page ${page.pageNumber} of ${totalPages} (text)`,
@@ -339,6 +343,7 @@ async function indexPdf(
             indexedAt: new Date().toISOString(),
             tags: tagsFromPath(filePath),
             date: extractDateFromFilename(filePath),
+            agentName: agentNameFromPath(filePath),
             assetType: "pdf",
             mimeType: "application/pdf",
             description: `PDF pages ${chunk.startPage}-${chunk.endPage} of ${totalPages} (multimodal)`,
@@ -400,6 +405,7 @@ async function indexAudio(
     indexedAt: new Date().toISOString(),
     tags: tagsFromPath(filePath),
     date: extractDateFromFilename(filePath),
+    agentName: agentNameFromPath(filePath),
     assetType: "audio",
     mimeType: getMimeType(filePath),
     description: `Audio transcription: ${transcript.slice(0, 200)}`,
