@@ -21,6 +21,7 @@
 # Spec: io-memory-engine.spec.md §2A.
 
 set -euo pipefail
+export LC_ALL=C.UTF-8
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=_log.sh
@@ -211,6 +212,105 @@ done
 
 UNPROCESSED_COUNT=${#UNPROCESSED_NEW[@]}
 
+# --- Inbox section (file-per-correspondent DMs with symlink mirror) ---
+
+LIVE_AGENTS=("io" "doctor-two" "andor" "aldus")
+
+render_inbox_section() {
+    local agent_name="${AGENT_NAME:-}"
+    [ -z "$agent_name" ] && return
+
+    local agents_root="$HOME/.the-brain/agents"
+    local my_inbox="$agents_root/$agent_name/inbox"
+    mkdir -p "$my_inbox"
+
+    # Self-heal symlink mirrors: if another agent has a thread file
+    # naming me in their inbox, ensure I have a reverse symlink.
+    for other in "${LIVE_AGENTS[@]}"; do
+        [ "$other" = "$agent_name" ] && continue
+        local their_file="$agents_root/$other/inbox/$agent_name.md"
+        local my_link="$my_inbox/$other.md"
+        if [ -f "$their_file" ] && [ ! -e "$my_link" ]; then
+            ln -sfn "$their_file" "$my_link"
+        fi
+    done
+
+    local total_new=0
+    local threads_with_new=0
+    local inbox_lines=""
+
+    for thread_file in "$my_inbox"/*.md; do
+        [ -f "$thread_file" ] || continue
+        local correspondent
+        correspondent="$(basename "$thread_file" .md)"
+
+        local new_count=0
+        local latest_ts="" latest_subject="" latest_from=""
+
+        while IFS= read -r heading; do
+            local msg_ts msg_from msg_subject
+            msg_ts="$(printf '%s' "$heading" | sed -n 's/^## \([^ ]*\) .*/\1/p')"
+            msg_from="$(printf '%s' "$heading" | sed -n 's/.*— from: \([^ ]*\) .*/\1/p')"
+            msg_subject="$(printf '%s' "$heading" | sed -n 's/.*— subject: \(.*\)/\1/p')"
+
+            [ -z "$msg_ts" ] && continue
+            [ "$msg_from" = "$agent_name" ] && continue
+
+            new_count=$((new_count + 1))
+            latest_ts="$msg_ts"
+            latest_subject="$msg_subject"
+            latest_from="$msg_from"
+        done < <(grep '^## [0-9].*— status: sent —' "$thread_file" 2>/dev/null)
+
+        if [ "$new_count" -gt 0 ]; then
+            total_new=$((total_new + new_count))
+            threads_with_new=$((threads_with_new + 1))
+            inbox_lines+="- 📩 from ${latest_from} — ${new_count} new, latest ${latest_ts}: \"${latest_subject}\""$'\n'
+        fi
+    done
+
+    if [ "$total_new" -gt 0 ]; then
+        local plural=""
+        [ "$threads_with_new" -gt 1 ] && plural="s"
+        printf '### 📬 Inbox (%d new across %d thread%s)\n\n%s' \
+            "$total_new" "$threads_with_new" "$plural" "$inbox_lines"
+    fi
+}
+
+mark_inbox_read() {
+    local agent_name="${AGENT_NAME:-}"
+    [ -z "$agent_name" ] && return
+
+    local agents_root="$HOME/.the-brain/agents"
+    local my_inbox="$agents_root/$agent_name/inbox"
+
+    for thread_file in "$my_inbox"/*.md; do
+        [ -f "$thread_file" ] || continue
+
+        if ! grep -q '^## [0-9].*— status: sent —' "$thread_file" 2>/dev/null; then
+            continue
+        fi
+
+        local real_path
+        real_path="$(readlink -f "$thread_file")"
+        local tmp
+        tmp="$(mktemp)"
+
+        awk -v agent="$agent_name" '{
+            if ($0 ~ /^## [0-9].*— status: sent —/ && index($0, "— from: " agent " —") == 0) {
+                sub(/— status: sent —/, "— status: read —")
+            }
+            print
+        }' "$real_path" > "$tmp"
+
+        if ! cmp -s "$tmp" "$real_path"; then
+            mv "$tmp" "$real_path"
+        else
+            rm -f "$tmp"
+        fi
+    done
+}
+
 # --- Assemble the three-zone block ---
 
 assemble_block() {
@@ -222,6 +322,14 @@ assemble_block() {
     block+="> **Current time: $(date +"%A %Y-%m-%d %H:%M %Z") ($(date -u +"%H:%M UTC"))** — treat dates in reflections below as historical unless they match this. (Live NOW above is fresher; trust it when in doubt.)"$'\n'
     block+="> era level=${ERA_LEVEL} · hot K=${HOT_K} · elders=${ELDER_COUNT} · unprocessed=${UNPROCESSED_COUNT}"$'\n'
     block+=$'\n'
+
+    # Zone 0 — Inbox
+    local inbox_section
+    inbox_section="$(render_inbox_section)"
+    if [ -n "$inbox_section" ]; then
+        block+="$inbox_section"$'\n'
+        block+=$'\n'
+    fi
 
     # Zone 1 — Era Summary
     block+="### Era Summary (compressed, level ${ERA_LEVEL})"$'\n'
@@ -396,6 +504,9 @@ splice_into_memory() {
 }
 
 splice_into_memory "$MEMORY_FILE" "$BLOCK"
+
+# --- Mark inbox messages as read (status: sent → read) ---
+mark_inbox_read
 
 # --- Update live-state.json with final metrics ---
 
