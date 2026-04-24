@@ -141,7 +141,7 @@ log info "state-reset" "{}"
 bash "$SCRIPT_DIR/build-context.sh"
 
 # Auto-index new reflection into Qdrant
-cd ~/io-projects/io-memory && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx src/cli.ts index --file "$OUTPUT_FILE" 2>/dev/null &
+cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null &
 
 echo ""
 echo "Review the reflection and merge notable items into MEMORY.md"

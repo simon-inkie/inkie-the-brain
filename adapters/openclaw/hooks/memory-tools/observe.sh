@@ -127,10 +127,10 @@ echo "📊 State updated: $NEW_COUNT unprocessed observations ($NEW_CHARS chars)
 bash "$SCRIPT_DIR/build-context.sh"
 
 # Auto-index new observation into Qdrant
-cd ~/io-projects/io-memory && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx src/cli.ts index --file "$OUTPUT_FILE" 2>/dev/null &
+cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null &
 
 # Cross-link observation to brain files
-cd ~/io-projects/io-memory && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx src/cli.ts cross-link "$OUTPUT_FILE" 2>/dev/null &
+cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts cross-link "$OUTPUT_FILE" 2>/dev/null &
 
 # Check if reflection is due (either count OR character threshold)
 COUNT_THRESHOLD=$(jq -r '.reflectionTriggerThreshold // 5' "$STATE_FILE" 2>/dev/null || echo "5")
