@@ -1,6 +1,1 @@
-{
-  "env": {
-    "AGENT_NAME": "doctor2",
-    "AGENT_ROLE": "brain-surgeon"
-  }
-}
+{}
