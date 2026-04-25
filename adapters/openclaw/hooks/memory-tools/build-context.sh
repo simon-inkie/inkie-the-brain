@@ -214,7 +214,7 @@ UNPROCESSED_COUNT=${#UNPROCESSED_NEW[@]}
 
 # --- Inbox section (file-per-correspondent DMs with symlink mirror) ---
 
-LIVE_AGENTS=("io" "doctor-two" "andor" "aldus")
+LIVE_AGENTS=("io" "doctor2" "andor" "aldus" "hopkins")
 
 render_inbox_section() {
     local agent_name="${AGENT_NAME:-}"
