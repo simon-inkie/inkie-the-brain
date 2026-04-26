@@ -41,6 +41,7 @@ export async function ensureCollections(): Promise<void> {
   for (const coll of [
     config.collections.observations,
     config.collections.reflections,
+    config.collections.messages,
   ]) {
     await ensurePayloadIndex(coll, "agentName", "keyword");
   }

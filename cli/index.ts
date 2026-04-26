@@ -148,7 +148,13 @@ async function runIndexMessages() {
       ? args[sessionFlag + 1]
       : undefined;
 
-  const result = await indexAllMessages(singleSession);
+  const agentFlag = args.indexOf("--agent");
+  const agentFilter =
+    agentFlag !== -1 && args[agentFlag + 1]
+      ? args[agentFlag + 1]
+      : undefined;
+
+  const result = await indexAllMessages(singleSession, agentFilter);
 
   console.error(
     `\nDone: ${result.sessionsProcessed} sessions processed, ${result.indexed} messages indexed, ${result.skipped} unchanged`

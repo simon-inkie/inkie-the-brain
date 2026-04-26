@@ -244,11 +244,11 @@ describe("reconcileMessageState", () => {
         lastSeq: messagesPerSession,
       };
     }
-    return { sessions, lastRun: "2026-04-04T10:00:00.000Z", totalMessagesIndexed: sessionCount * messagesPerSession };
+    return { sessions, ccSessions: {}, lastRun: "2026-04-04T10:00:00.000Z", totalMessagesIndexed: sessionCount * messagesPerSession };
   }
 
   it("passes through empty state", async () => {
-    const state = { sessions: {}, lastRun: "", totalMessagesIndexed: 0 };
+    const state = { sessions: {}, ccSessions: {}, lastRun: "", totalMessagesIndexed: 0 };
     const result = await reconcileMessageState(state, {
       getCount: fakeCount({ [config.collections.messages]: 0 }),
     });

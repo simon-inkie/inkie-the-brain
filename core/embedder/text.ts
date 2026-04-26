@@ -16,23 +16,36 @@ export async function embedTexts(
   texts: string[],
   taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY"
 ): Promise<number[][]> {
-  const response = await getClient().models.embedContent({
-    model: config.embeddingModel,
-    contents: texts,
-    config: {
-      outputDimensionality: config.embeddingDimensions,
-      taskType,
-    },
-  });
+  const client = getClient();
+  const vectors: number[][] = [];
+  const concurrency = 5;
 
-  if (!response.embeddings) {
-    throw new Error("No embeddings returned from Gemini API");
+  for (let i = 0; i < texts.length; i += concurrency) {
+    const batch = texts.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map((text) =>
+        client.models.embedContent({
+          model: config.embeddingModel,
+          contents: text,
+          config: {
+            outputDimensionality: config.embeddingDimensions,
+            taskType,
+          },
+        })
+      )
+    );
+
+    for (const [j, response] of results.entries()) {
+      if (!response.embeddings || response.embeddings.length === 0) {
+        throw new Error(`No embedding returned for text ${i + j}`);
+      }
+      const values = response.embeddings[0].values;
+      if (!values) throw new Error(`Embedding ${i + j} has no values`);
+      vectors.push(values);
+    }
   }
 
-  return response.embeddings.map((e) => {
-    if (!e.values) throw new Error("Embedding has no values");
-    return e.values;
-  });
+  return vectors;
 }
 
 export async function embedText(
