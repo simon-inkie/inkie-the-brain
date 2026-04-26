@@ -27,6 +27,8 @@ try {
   /* .env not found */
 }
 
+import { spawn } from "node:child_process";
+
 import {
   runObservation,
   type HookInput,
@@ -82,6 +84,28 @@ async function main(): Promise<void> {
       );
     }
   }
+
+  // Index current agent's CC conversations in background before context is lost
+  const agentName = process.env.AGENT_NAME;
+  if (agentName) {
+    try {
+      const brainRoot = resolve(homedir(), "io-projects", "the-brain");
+      const child = spawn(
+        "node",
+        ["--import", "tsx/esm", "cli/index.ts", "index-messages", "--agent", agentName],
+        {
+          cwd: brainRoot,
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env },
+        },
+      );
+      child.unref();
+    } catch {
+      // fail-open
+    }
+  }
+
   emit();
 }
 
