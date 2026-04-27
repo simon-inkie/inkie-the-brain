@@ -36,12 +36,14 @@ async function runSearch() {
   }
   const collectionFlag = flagValue("--collection");
   const agentsFlag = flagValue("--agents");
+  const fromFlag = flagValue("--from");
+  const toFlag = flagValue("--to");
   const query = tokens
     .filter((_, i) => !consumed.has(i) && !tokens[i].startsWith("--"))
     .join(" ");
   if (!query) {
     console.error(
-      'Usage: tsx cli/index.ts search "your query" [--collection name] [--agents name1,name2,__own__]',
+      'Usage: tsx cli/index.ts search "your query" [--collection name] [--agents name1,name2,__own__] [--from YYYY-MM-DD] [--to YYYY-MM-DD]',
     );
     process.exit(1);
   }
@@ -65,12 +67,16 @@ async function runSearch() {
 
   await ensureCollections();
   const queryVector = await embedText(query, "RETRIEVAL_QUERY");
+  const filter: { agentNames?: string[]; from?: string; to?: string } = {};
+  if (agents && agents.length > 0) filter.agentNames = agents;
+  if (fromFlag) filter.from = fromFlag;
+  if (toFlag) filter.to = toFlag;
   const results = await search(
     collections,
     queryVector,
     config.searchDefaults.limit,
     config.searchDefaults.scoreThreshold,
-    agents && agents.length > 0 ? { agentNames: agents } : undefined,
+    Object.keys(filter).length > 0 ? filter : undefined,
   );
 
   if (results.length === 0) {

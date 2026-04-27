@@ -41,8 +41,20 @@ server.tool(
       .describe(
         "Scope results to specific agent silos (by AGENT_NAME). Omit or pass empty array for cross-agent default. Pass `'__own__'` to resolve to this session's AGENT_NAME env var at query time.",
       ),
+    from: z
+      .string()
+      .optional()
+      .describe(
+        "ISO date or datetime string — only return results on or after this date. Example: '2026-04-01'. Filters io-messages by timestampMs and other collections by date field.",
+      ),
+    to: z
+      .string()
+      .optional()
+      .describe(
+        "ISO date or datetime string — only return results on or before this date. Example: '2026-04-30'.",
+      ),
   },
-  async ({ query, collections, limit, agents }) => {
+  async ({ query, collections, limit, agents, from, to }) => {
     const searchCollections = collections ?? allCollections;
     const searchLimit = limit ?? config.searchDefaults.limit;
 
@@ -56,12 +68,17 @@ server.tool(
     }
 
     const queryVector = await embedText(query, "RETRIEVAL_QUERY");
+    const filter: { agentNames?: string[]; from?: string; to?: string } = {};
+    if (resolvedAgents) filter.agentNames = resolvedAgents;
+    if (from) filter.from = from;
+    if (to) filter.to = to;
+
     const results = await search(
       searchCollections,
       queryVector,
       searchLimit,
       config.searchDefaults.scoreThreshold,
-      resolvedAgents ? { agentNames: resolvedAgents } : undefined,
+      Object.keys(filter).length > 0 ? filter : undefined,
     );
 
     const response = {
@@ -84,6 +101,7 @@ server.tool(
       totalResults: results.length,
       searchedCollections: searchCollections,
       ...(resolvedAgents ? { scopedToAgents: resolvedAgents } : {}),
+      ...(from || to ? { dateRange: { from, to } } : {}),
     };
 
     return {

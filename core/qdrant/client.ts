@@ -118,6 +118,31 @@ export interface SearchResult {
 
 export interface SearchFilter {
   agentNames?: string[];
+  /** ISO date or datetime string. Inclusive lower bound. */
+  from?: string;
+  /** ISO date or datetime string. Inclusive upper bound. */
+  to?: string;
+}
+
+function buildDateClauses(
+  collection: string,
+  from?: string,
+  to?: string,
+): Record<string, unknown>[] {
+  if (!from && !to) return [];
+
+  // io-messages stores numeric `timestampMs`; everything else stores `date` as YYYY-MM-DD string.
+  if (collection === "io-messages") {
+    const range: Record<string, number> = {};
+    if (from) range.gte = new Date(from).getTime();
+    if (to) range.lte = new Date(to).getTime();
+    return [{ key: "timestampMs", range }];
+  }
+
+  const range: Record<string, string> = {};
+  if (from) range.gte = from.slice(0, 10);
+  if (to) range.lte = to.slice(0, 10);
+  return [{ key: "date", range }];
 }
 
 export async function search(
@@ -129,16 +154,14 @@ export async function search(
 ): Promise<SearchResult[]> {
   const allResults: SearchResult[] = [];
 
-  const qdrantFilter =
-    filter?.agentNames && filter.agentNames.length > 0
-      ? {
-          must: [
-            { key: "agentName", match: { any: filter.agentNames } },
-          ],
-        }
-      : undefined;
-
   for (const collection of collections) {
+    const must: Record<string, unknown>[] = [];
+    if (filter?.agentNames && filter.agentNames.length > 0) {
+      must.push({ key: "agentName", match: { any: filter.agentNames } });
+    }
+    must.push(...buildDateClauses(collection, filter?.from, filter?.to));
+    const qdrantFilter = must.length > 0 ? { must } : undefined;
+
     try {
       const results = await client.search(collection, {
         vector: queryVector,
