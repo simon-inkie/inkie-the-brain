@@ -133,7 +133,36 @@ done
 
 echo ""
 
-# --- 6. Watcher recent activity ---
+# --- 6. Projects-sync freshness ---
+echo "## Projects sync (io-projects-observer)"
+today=$(date +%Y-%m-%d)
+sync_file="$HOME_DIR/brain/work/${today}-projects-sync.md"
+hour=$(date +%H)
+if [[ -f "$sync_file" ]]; then
+  size=$(wc -c < "$sync_file")
+  echo "  $PASS Today's brief: $sync_file (${size} bytes)"
+elif [[ "$hour" -ge 8 ]]; then
+  echo "  $FAIL Today's brief missing past 08:00 — observer may have failed"
+  errors=$((errors + 1))
+else
+  echo "  $WARN Today's brief not yet generated (it's before 08:00)"
+fi
+
+# Check we have a recent run streak (no gaps in last 3 days)
+missing=0
+for offset in 1 2 3; do
+  d=$(date -d "$offset days ago" +%Y-%m-%d 2>/dev/null || date -v-${offset}d +%Y-%m-%d 2>/dev/null)
+  [[ -f "$HOME_DIR/brain/work/${d}-projects-sync.md" ]] || missing=$((missing + 1))
+done
+if [[ "$missing" -eq 0 ]]; then
+  echo "  $PASS Last 3 days all have briefs"
+else
+  echo "  $WARN $missing/3 prior days missing briefs"
+fi
+
+echo ""
+
+# --- 7. Watcher recent activity ---
 echo "## Watcher activity (last 30 min)"
 recent=$(journalctl --user -u io-watcher.service --since "30 min ago" --no-pager 2>/dev/null | grep -c "Indexed:")
 if [[ "$recent" -gt 0 ]]; then
