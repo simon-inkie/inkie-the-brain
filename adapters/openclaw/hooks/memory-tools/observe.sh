@@ -82,7 +82,7 @@ Output your observations using the XML format specified. Include <observations>,
 # Uses claude CLI in print mode with a fast model
 echo "🔬 Running observation pass..."
 log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
-RESULT=$(echo "$FULL_PROMPT" | claude --print --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
+RESULT=$(echo "$FULL_PROMPT" | claude --print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
 
 if [ -z "$RESULT" ]; then
     log error "claude-call-failed" "{\"reason\":\"empty-result\"}"

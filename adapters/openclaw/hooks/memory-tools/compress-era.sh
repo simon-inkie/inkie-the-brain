@@ -139,7 +139,7 @@ echo "🗜️  compress-era: level=$LEVEL, absorbing $NEW_COUNT reflection(s), l
 TMP_OUT="$(mktemp)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
-if ! echo "$USER_PROMPT" | claude --print --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" > "$TMP_OUT" 2>/dev/null; then
+if ! echo "$USER_PROMPT" | claude --print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" > "$TMP_OUT" 2>/dev/null; then
     echo "Error: claude CLI failed" >&2
     exit 3
 fi

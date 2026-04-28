@@ -1,6 +1,6 @@
 export const MIN_OBSERVATION_GAP_MS = 25 * 60 * 1000;
 export const DEFAULT_OBSERVATION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-export const MAX_OBSERVATION_MESSAGES = 50;
+export const MAX_OBSERVATION_MESSAGES = 100;
 export const SESSION_CHECK_INTERVAL = 10;
 
 export interface Pointer {
