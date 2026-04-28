@@ -35,6 +35,7 @@ interface Args {
   chunkMessages: number;
   chunkChars: number;
   dryRun: boolean;
+  fromOffset: number;
 }
 
 function parseArgs(): Args {
@@ -42,6 +43,7 @@ function parseArgs(): Args {
     chunkMessages: 40,
     chunkChars: 80000,
     dryRun: false,
+    fromOffset: 0,
   };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
@@ -50,6 +52,7 @@ function parseArgs(): Args {
     else if (a === "--memory") out.memory = argv[++i];
     else if (a === "--chunk-messages") out.chunkMessages = Number(argv[++i]);
     else if (a === "--chunk-chars") out.chunkChars = Number(argv[++i]);
+    else if (a === "--from-offset") out.fromOffset = Number(argv[++i]);
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "-h" || a === "--help") {
       printUsage();
@@ -69,7 +72,7 @@ function parseArgs(): Args {
 
 function printUsage(): void {
   console.error(
-    "Usage: replay-transcript --transcript <path> --memory <dir> [--chunk-messages N] [--chunk-chars N] [--dry-run]",
+    "Usage: replay-transcript --transcript <path> --memory <dir> [--chunk-messages N] [--chunk-chars N] [--from-offset N] [--dry-run]",
   );
 }
 
@@ -111,10 +114,17 @@ function main(): void {
   const transcript = resolve(args.transcript);
   const memoryDir = resolve(args.memory);
 
-  const { messages } = readTranscriptFromOffset(transcript, 0);
+  const { messages, newOffset } = readTranscriptFromOffset(transcript, args.fromOffset);
   if (messages.length === 0) {
-    console.error(`[replay] no substantive messages in ${transcript}`);
+    console.error(
+      `[replay] no substantive messages in ${transcript} from offset ${args.fromOffset}`,
+    );
     process.exit(0);
+  }
+  if (args.fromOffset > 0) {
+    console.log(
+      `[replay] starting from offset ${args.fromOffset} (will end at ${newOffset})`,
+    );
   }
 
   const chunks = chunk<TranscriptMessage>(

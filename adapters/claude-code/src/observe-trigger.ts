@@ -43,9 +43,12 @@ export interface TriggerOptions {
   label?: string;
 }
 
-export function sessionKeyFor(projectDir: string, sessionId: string): string {
-  const slug = projectDir.replace(/\//g, "-").replace(/^-+/, "");
-  return `cc:${slug}:${sessionId}`;
+export function sessionKeyFor(_projectDir: string, sessionId: string): string {
+  // Keyed on sessionId only — the JSONL file (one per session) is the canonical identity.
+  // Including projectDir caused pointer fragmentation when an agent cd'd between worktrees
+  // mid-session: each cwd shift created a new pointer file, so observation state got
+  // sharded across them. _projectDir kept in signature for back-compat with existing callers.
+  return `cc:${sessionId}`;
 }
 
 

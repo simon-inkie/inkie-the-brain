@@ -113,21 +113,34 @@ echo ""
 
 # --- 5. Agent silos ---
 echo "## Agent silos"
+NOW=$(date +%s)
 for agent in io doctor2 aldus andor hopkins; do
   silo="$HOME_DIR/.the-brain/agents/$agent"
   obs=$(ls "$silo/memory/observations/" 2>/dev/null | wc -l)
   ref=$(ls "$silo/memory/reflections/" 2>/dev/null | wc -l)
-  mem="✗"
-  [[ -f "$silo/MEMORY.md" ]] && mem="✓"
+  mem_file="$silo/MEMORY.md"
   inbox=$(ls "$silo/inbox/" 2>/dev/null | wc -l)
 
-  if [[ "$mem" == "✓" && "$obs" -gt 0 ]]; then
-    echo "  $PASS $agent: obs=$obs ref=$ref MEMORY.md=$mem inbox=$inbox"
-  elif [[ "$mem" == "✗" ]]; then
+  if [[ ! -f "$mem_file" ]]; then
     echo "  $FAIL $agent: MEMORY.md missing"
     errors=$((errors + 1))
+    continue
+  fi
+
+  mem_size=$(wc -c < "$mem_file")
+  mem_mtime=$(stat -c %Y "$mem_file")
+  mem_age_h=$(( (NOW - mem_mtime) / 3600 ))
+
+  # Stale threshold: 48h. Most agents observe at least daily; longer = something's wrong.
+  if [[ $mem_size -lt 1000 ]]; then
+    echo "  $FAIL $agent: MEMORY.md only ${mem_size}b (likely empty/broken)"
+    errors=$((errors + 1))
+  elif [[ $mem_age_h -gt 48 ]]; then
+    echo "  $WARN $agent: MEMORY.md stale (${mem_age_h}h old) — observe.sh may be failing"
   else
-    echo "  $WARN $agent: obs=$obs (may be new)"
+    age_label="${mem_age_h}h"
+    [[ $mem_age_h -eq 0 ]] && age_label="$(( (NOW - mem_mtime) / 60 ))m"
+    echo "  $PASS $agent: obs=$obs ref=$ref MEMORY.md=${mem_size}b age=${age_label} inbox=$inbox"
   fi
 done
 
