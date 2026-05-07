@@ -19,11 +19,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/simon/io-projects/the-brain
-ExecStart=/home/simon/.local/share/pnpm/pnpm watch
+WorkingDirectory=%h/io-projects/the-brain
+ExecStart=%h/.local/share/pnpm/pnpm watch
 Restart=on-failure
 RestartSec=5
-EnvironmentFile=/home/simon/io-data/.env
+EnvironmentFile=%h/io-data/.env
 
 [Install]
 WantedBy=default.target

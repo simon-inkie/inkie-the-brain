@@ -7,7 +7,7 @@ describe("detectCollection", () => {
     it("routes ~/.the-brain/agents/inkie-io/memory/observations/* to io-observations", () => {
       expect(
         detectCollection(
-          "/home/simon/.the-brain/agents/inkie-io/memory/observations/2026-04-21-14-05-22.md",
+          "/home/test-user/.the-brain/agents/inkie-io/memory/observations/2026-04-21-14-05-22.md",
         ),
       ).toBe(config.collections.observations);
     });
@@ -15,30 +15,30 @@ describe("detectCollection", () => {
     it("routes ~/.the-brain/agents/inkie-io/memory/reflections/* to io-reflections", () => {
       expect(
         detectCollection(
-          "/home/simon/.the-brain/agents/inkie-io/memory/reflections/2026-04-21-14-05-22.md",
+          "/home/test-user/.the-brain/agents/inkie-io/memory/reflections/2026-04-21-14-05-22.md",
         ),
       ).toBe(config.collections.reflections);
     });
 
     it("routes per-agent MEMORY.md to io-reflections", () => {
       expect(
-        detectCollection("/home/simon/.the-brain/agents/inkie-io/MEMORY.md"),
+        detectCollection("/home/test-user/.the-brain/agents/inkie-io/MEMORY.md"),
       ).toBe(config.collections.reflections);
     });
 
     it("works for arbitrary future agent names", () => {
       expect(
         detectCollection(
-          "/home/simon/.the-brain/agents/harness-hello-world/memory/observations/2026-04-21-14-05-22.md",
+          "/home/test-user/.the-brain/agents/harness-hello-world/memory/observations/2026-04-21-14-05-22.md",
         ),
       ).toBe(config.collections.observations);
       expect(
         detectCollection(
-          "/home/simon/.the-brain/agents/greymatter-dev/memory/reflections/2026-04-21.md",
+          "/home/test-user/.the-brain/agents/greymatter-dev/memory/reflections/2026-04-21.md",
         ),
       ).toBe(config.collections.reflections);
       expect(
-        detectCollection("/home/simon/.the-brain/agents/inkie-bugfix-2/MEMORY.md"),
+        detectCollection("/home/test-user/.the-brain/agents/inkie-bugfix-2/MEMORY.md"),
       ).toBe(config.collections.reflections);
     });
   });
@@ -47,7 +47,7 @@ describe("detectCollection", () => {
     it("still routes OpenClaw observations", () => {
       expect(
         detectCollection(
-          "/home/simon/.openclaw/workspace/memory/observations/2026-04-19-15-43.md",
+          "/home/test-user/.openclaw/workspace/memory/observations/2026-04-19-15-43.md",
         ),
       ).toBe(config.collections.observations);
     });
@@ -55,14 +55,14 @@ describe("detectCollection", () => {
     it("still routes OpenClaw reflections", () => {
       expect(
         detectCollection(
-          "/home/simon/.openclaw/workspace/memory/reflections/2026-04-19.md",
+          "/home/test-user/.openclaw/workspace/memory/reflections/2026-04-19.md",
         ),
       ).toBe(config.collections.reflections);
     });
 
     it("still routes OpenClaw MEMORY.md", () => {
       expect(
-        detectCollection("/home/simon/.openclaw/workspace/MEMORY.md"),
+        detectCollection("/home/test-user/.openclaw/workspace/MEMORY.md"),
       ).toBe(config.collections.reflections);
     });
   });
@@ -70,26 +70,26 @@ describe("detectCollection", () => {
   describe("brain vault", () => {
     it("routes ~/brain/ideas/* to brain-vault", () => {
       expect(
-        detectCollection("/home/simon/brain/ideas/claude-io-multi-agent-platform.md"),
+        detectCollection("/home/test-user/brain/ideas/claude-io-multi-agent-platform.md"),
       ).toBe(config.collections.brain);
     });
 
     it("routes ~/brain/decisions/* to brain-vault", () => {
       expect(
-        detectCollection("/home/simon/brain/decisions/2026-04-10-context-engine-plugin.md"),
+        detectCollection("/home/test-user/brain/decisions/2026-04-10-context-engine-plugin.md"),
       ).toBe(config.collections.brain);
     });
 
     it("routes ~/.openclaw/workspace/brain/* to brain-vault (symlink source)", () => {
       expect(
-        detectCollection("/home/simon/.openclaw/workspace/brain/ideas/foo.md"),
+        detectCollection("/home/test-user/.openclaw/workspace/brain/ideas/foo.md"),
       ).toBe(config.collections.brain);
     });
   });
 
   describe("non-matching paths", () => {
     it("returns null for random files", () => {
-      expect(detectCollection("/home/simon/some/random/file.md")).toBe(null);
+      expect(detectCollection("/home/test-user/some/random/file.md")).toBe(null);
     });
 
     it("returns null for files outside tracked locations", () => {
@@ -103,7 +103,7 @@ describe("detectCollection", () => {
       // observations — the per-agent check runs first.
       expect(
         detectCollection(
-          "/home/simon/brain/some/weird/memory/observations/x.md",
+          "/home/test-user/brain/some/weird/memory/observations/x.md",
         ),
       ).toBe(config.collections.observations);
     });
@@ -115,21 +115,21 @@ describe("agentNameFromPath", () => {
     it("extracts name from ~/.the-brain/agents/<name>/memory/...", () => {
       expect(
         agentNameFromPath(
-          "/home/simon/.the-brain/agents/io/memory/observations/2026-04-22-10-00.md",
+          "/home/test-user/.the-brain/agents/io/memory/observations/2026-04-22-10-00.md",
         ),
       ).toBe("io");
     });
 
     it("extracts name from per-agent MEMORY.md", () => {
       expect(
-        agentNameFromPath("/home/simon/.the-brain/agents/doctor-two/MEMORY.md"),
+        agentNameFromPath("/home/test-user/.the-brain/agents/doctor-two/MEMORY.md"),
       ).toBe("doctor-two");
     });
 
     it("handles hyphenated names", () => {
       expect(
         agentNameFromPath(
-          "/home/simon/.the-brain/agents/inkie-bugfix-2/memory/reflections/2026-04-19.md",
+          "/home/test-user/.the-brain/agents/inkie-bugfix-2/memory/reflections/2026-04-19.md",
         ),
       ).toBe("inkie-bugfix-2");
     });
@@ -154,7 +154,7 @@ describe("agentNameFromPath", () => {
   describe("unscoped paths (should be null)", () => {
     it("returns null for brain vault paths", () => {
       expect(
-        agentNameFromPath("/home/simon/brain/ideas/something.md"),
+        agentNameFromPath("/home/test-user/brain/ideas/something.md"),
       ).toBe(null);
     });
 
@@ -170,7 +170,7 @@ describe("agentNameFromPath", () => {
 
     it("returns null for OpenClaw workspace paths", () => {
       expect(
-        agentNameFromPath("/home/simon/.openclaw/workspace/memory/observations/x.md"),
+        agentNameFromPath("/home/test-user/.openclaw/workspace/memory/observations/x.md"),
       ).toBe(null);
     });
 

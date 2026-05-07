@@ -43,7 +43,7 @@ Every line is a JSON object with these fields. Optional fields are omitted when 
 
 Example:
 ```json
-{"ts":"2026-04-20T16:55:22.468Z","level":"info","traceId":"573568c1:1745175322468","component":"observe-trigger","event":"hook-fired","cwd":"/home/simon/inkie-io","sessionId":"573568c1-d4f4-43fc-9e00-f82967509b28","data":{"force":true,"label":"precompact","fired":false,"reason":"observe.sh not found at ..."}}
+{"ts":"2026-04-20T16:55:22.468Z","level":"info","traceId":"573568c1:1745175322468","component":"observe-trigger","event":"hook-fired","cwd":"/home/<user>/<your-project>","sessionId":"573568c1-d4f4-43fc-9e00-f82967509b28","data":{"force":true,"label":"precompact","fired":false,"reason":"observe.sh not found at ..."}}
 ```
 
 ## 5. Log levels — when to use which

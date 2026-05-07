@@ -93,7 +93,7 @@ The Brain's memory lives on disk (`memory/observations/`, `memory/reflections/`,
   "mcpServers": {
     "io-memory": {
       "command": "node",
-      "args": ["/home/simon/io-projects/the-brain/dist/mcp/server.js"],
+      "args": ["<absolute-path-to>/the-brain/dist/mcp/server.js"],
       "env": { "GEMINI_API_KEY": "…", "QDRANT_API_KEY": "…" }
     }
   }

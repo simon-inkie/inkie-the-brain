@@ -234,7 +234,7 @@ describe("on-stop — run()", () => {
 
 describe("sessionKeyFor", () => {
   it("slugifies the project dir and appends session id", () => {
-    expect(sessionKeyFor("/home/simon/io-projects/the-brain", "abc123")).toBe(
+    expect(sessionKeyFor("/home/test-user/io-projects/the-brain", "abc123")).toBe(
       "cc:home-simon-io-projects-the-brain:abc123",
     );
   });

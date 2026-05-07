@@ -68,16 +68,16 @@ describe("parseConfig", () => {
   });
 
   it("resolves memoryRoot and memoryFile using workspace path", () => {
-    const cfg = parseConfig({}, "/home/simon");
-    expect(cfg.memoryRoot).toBe("/home/simon/.openclaw/workspace/memory");
-    expect(cfg.memoryFile).toBe("/home/simon/.openclaw/workspace/MEMORY.md");
+    const cfg = parseConfig({}, "/home/test-user");
+    expect(cfg.memoryRoot).toBe("/home/test-user/.openclaw/workspace/memory");
+    expect(cfg.memoryFile).toBe("/home/test-user/.openclaw/workspace/MEMORY.md");
   });
 
   it("uses custom memoryRoot and memoryFile when provided", () => {
     const cfg = parseConfig({
       memoryRoot: "/custom/memory",
       memoryFile: "/custom/MEMORY.md",
-    }, "/home/simon");
+    }, "/home/test-user");
     expect(cfg.memoryRoot).toBe("/custom/memory");
     expect(cfg.memoryFile).toBe("/custom/MEMORY.md");
   });

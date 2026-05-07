@@ -84,29 +84,36 @@ done
 
 echo ""
 
-# --- 4. Classifiers ---
-echo "## Classifiers"
+# --- 4. Classifiers (optional — only run if io-auto-mode is installed) ---
+# Override the install location with IO_AUTO_MODE_DIR if non-default.
+IO_AUTO_MODE_DIR="${IO_AUTO_MODE_DIR:-$HOME_DIR/io-projects/io-auto-mode}"
+if [[ -d "$IO_AUTO_MODE_DIR" ]]; then
+  echo "## Classifiers (io-auto-mode at $IO_AUTO_MODE_DIR)"
 
-# File classifier
-file_result=$(echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/health-check-test"},"cwd":"/tmp"}' \
-  | node "$HOME_DIR/io-projects/io-auto-mode/adapters/claude-code/dist/file-hook.js" 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])" 2>/dev/null)
-if [[ "$file_result" == "allow" ]]; then
-  echo "  $PASS File classifier: responding"
-else
-  echo "  $FAIL File classifier: not responding (got: ${file_result:-nothing})"
-  errors=$((errors + 1))
-fi
+  # File classifier
+  file_result=$(echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/health-check-test"},"cwd":"/tmp"}' \
+    | node "$IO_AUTO_MODE_DIR/adapters/claude-code/dist/file-hook.js" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])" 2>/dev/null)
+  if [[ "$file_result" == "allow" ]]; then
+    echo "  $PASS File classifier: responding"
+  else
+    echo "  $FAIL File classifier: not responding (got: ${file_result:-nothing})"
+    errors=$((errors + 1))
+  fi
 
-# Bash classifier (static stage only — avoid burning LLM credits)
-bash_result=$(echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}' \
-  | timeout 5 /home/simon/io-projects/io-auto-mode/adapters/claude-code/bin/classify.sh 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])" 2>/dev/null)
-if [[ -n "$bash_result" ]]; then
-  echo "  $PASS Bash classifier: responding ($bash_result)"
+  # Bash classifier (static stage only — avoid burning LLM credits)
+  bash_result=$(echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp"}' \
+    | timeout 5 "$IO_AUTO_MODE_DIR/adapters/claude-code/bin/classify.sh" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])" 2>/dev/null)
+  if [[ -n "$bash_result" ]]; then
+    echo "  $PASS Bash classifier: responding ($bash_result)"
+  else
+    echo "  $FAIL Bash classifier: timeout or error"
+    errors=$((errors + 1))
+  fi
 else
-  echo "  $FAIL Bash classifier: timeout or error"
-  errors=$((errors + 1))
+  echo "## Classifiers"
+  echo "  -- io-auto-mode not installed at $IO_AUTO_MODE_DIR — skipping (set IO_AUTO_MODE_DIR to override)"
 fi
 
 echo ""
