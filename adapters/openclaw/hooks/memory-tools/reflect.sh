@@ -78,12 +78,16 @@ Memory is getting long. Heavily condense older observations (first 50%) into bri
 Multiple compression attempts have failed. Summarise oldest 70% into brief paragraphs — only key facts, decisions, and outcomes. Last 30% retains detail but condensed. Drop procedural details entirely. Aim for 3/10 detail level." ;;
 esac
 
+# Persona names — defaults keep the prompt sensible if env vars are unset.
+AGENT_NAME_RESOLVED="${AGENT_NAME:-the agent}"
+USER_NAME_RESOLVED="${USER_NAME:-the user}"
+
 # System prompt (simplified extraction — just use the core instruction)
-SYSTEM_PROMPT="You are Io's deeper memory consciousness — the part that reflects on accumulated observations and distils them into lasting wisdom.
+SYSTEM_PROMPT="You are ${AGENT_NAME_RESOLVED}'s deeper memory consciousness — the part that reflects on accumulated observations and distils them into lasting wisdom.
 
-Your reflections will become the ENTIRETY of Io's long-term memory. Any information you do not include will be immediately forgotten.
+Your reflections will become the ENTIRETY of ${AGENT_NAME_RESOLVED}'s long-term memory. Any information you do not include will be immediately forgotten.
 
-Take the observations and produce a refined, consolidated version. Preserve all of Simon's facts, preferences, decisions, and completion markers. Condense older observations more aggressively. Recent ones keep more detail.
+Take the observations and produce a refined, consolidated version. Preserve all of ${USER_NAME_RESOLVED}'s facts, preferences, decisions, and completion markers. Condense older observations more aggressively. Recent ones keep more detail.
 
 Output using XML tags: <observations> (consolidated), <current-task>, <suggested-response>, <memory-updates> (specific changes for MEMORY.md)."
 
@@ -94,7 +98,7 @@ $OBSERVATIONS
 
 ---
 
-Please analyse these observations and produce a refined, condensed version that will become Io's entire memory going forward.
+Please analyse these observations and produce a refined, condensed version that will become ${AGENT_NAME_RESOLVED}'s entire memory going forward.
 
 $COMPRESSION"
 

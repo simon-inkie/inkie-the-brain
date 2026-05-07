@@ -58,8 +58,16 @@ SYSTEM_PROMPT=$(sed -n '/^## System Prompt/,/^## User Prompt/{ /^```$/,/^```$/{ 
 # If extraction failed, use a simpler approach
 if [ -z "$SYSTEM_PROMPT" ]; then
     echo "Warning: Could not extract system prompt from OBSERVATION-PROMPT.md, using embedded fallback"
-    SYSTEM_PROMPT="You are Io's memory consciousness. Extract structured observations from this conversation using XML tags: <observations>, <current-task>, <suggested-response>. Use priority emojis: 🔴 High, 🟡 Medium, 🟢 Low, ✅ Completed."
+    SYSTEM_PROMPT="You are the agent's memory consciousness. Extract structured observations from this conversation using XML tags: <observations>, <current-task>, <suggested-response>. Use priority emojis: 🔴 High, 🟡 Medium, 🟢 Low, ✅ Completed."
 fi
+
+# Substitute persona placeholders. AGENT_NAME defaults to "the agent",
+# USER_NAME defaults to "the user" — keeps the prompt sensible if env
+# vars are unset (e.g. fresh OSS install before `the-brain agent init`).
+AGENT_NAME_RESOLVED="${AGENT_NAME:-the agent}"
+USER_NAME_RESOLVED="${USER_NAME:-the user}"
+SYSTEM_PROMPT=${SYSTEM_PROMPT//\{AGENT_NAME\}/$AGENT_NAME_RESOLVED}
+SYSTEM_PROMPT=${SYSTEM_PROMPT//\{USER_NAME\}/$USER_NAME_RESOLVED}
 
 # Generate timestamp for filename.
 # Second resolution (not minute) so bursts — e.g. replay-transcript backfill

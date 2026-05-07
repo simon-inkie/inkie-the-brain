@@ -131,6 +131,13 @@ Return ONLY the new consolidated era summary. No preamble, no explanation."
 
 SYSTEM_PROMPT="$(cat "$PROMPT_FILE")"
 
+# Substitute persona placeholders ({USER_NAME}, {AGENT_NAME}). Defaults
+# keep prompts sensible if env vars are unset (fresh OSS install).
+USER_NAME_RESOLVED="${USER_NAME:-the user}"
+AGENT_NAME_RESOLVED="${AGENT_NAME:-the agent}"
+SYSTEM_PROMPT=${SYSTEM_PROMPT//\{USER_NAME\}/$USER_NAME_RESOLVED}
+SYSTEM_PROMPT=${SYSTEM_PROMPT//\{AGENT_NAME\}/$AGENT_NAME_RESOLVED}
+
 # --- Call the model ---
 
 echo "🗜️  compress-era: level=$LEVEL, absorbing $NEW_COUNT reflection(s), latest=$LATEST_REFLECTION_DATE" >&2
