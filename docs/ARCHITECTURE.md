@@ -1,8 +1,8 @@
-# The Brain — Claude Code Adapter Spec
+# The Brain — Architecture & Claude Code Integration
 
-**Status:** spec, not started
-**Date:** 2026-04-16
-**Goal:** port the-brain from OpenClaw to Claude Code as the memory layer for Io's upcoming directory-as-agent platform (see `brain/ideas/claude-io-multi-agent-platform.md`).
+**Goal:** memory that survives compaction. The brain wires Claude Code's hook system to a structured observation pipeline so an agent's lived context (decisions, in-flight tasks, accumulated facts) persists across sessions and surfaces back via semantic recall when the next session opens.
+
+This document explains the design intuition and the hook architecture. For install steps, see `QUICKSTART.md`. For the API surface, see `README.md`.
 
 ---
 
@@ -109,7 +109,7 @@ Provides the `remembering` tool — semantic search over brain + observations + 
 `cwd` is in every hook payload. Use it to scope memory per-agent (per-project):
 
 ```
-~/.openclaw/workspace/           ← main Io agent's memory dir (existing)
+~/.openclaw/workspace/           ← primary agent memory dir (existing)
 ├── memory/
 │   ├── observations/
 │   ├── reflections/
@@ -317,12 +317,12 @@ v1 answer: share. Observations are per-agent (per-project), not per-session. If 
 
 The Brain's OpenClaw adapter stays live throughout. The Claude Code adapter is additive — both can coexist:
 
-- OpenClaw agents (Io's current main) keep using the OpenClaw plugin + hook pack
+- OpenClaw agents keep using the OpenClaw plugin + hook pack
 - New Claude Code agents use the Claude Code adapter
 - Both write to the same Qdrant collections + share the same brain/memory dirs (if they're in the same project)
 - MCP server exposes memory identically to both
 
-Eventual cutover: once Io's main migrates to Claude Code (`claude-io/main/`), OpenClaw goes cold. Keep the OpenClaw adapter for a while as a compatibility shim, then retire when confident.
+Eventual cutover: once your primary agent migrates to Claude Code, OpenClaw goes cold. Keep the OpenClaw adapter for a while as a compatibility shim, then retire when confident.
 
 No big-bang migration. Parallel running is the default state.
 

@@ -195,7 +195,7 @@ After implementation, confirm with one real session:
 # 1. Tail the log in another terminal
 tail -f ~/.the-brain/logs/hook-activity.jsonl | jq .
 
-# 2. Open a CC session in ~/inkie-io, send 1 prompt, end the turn
+# 2. Open a CC session in ~/<your-project>, send 1 prompt, end the turn
 # 3. Confirm the log shows: user-prompt-submit hook-fired, memory-root resolved,
 #    on-stop fired, observe-trigger hook-fired, observe.sh enter+exit, etc.,
 #    all sharing the same traceId.

@@ -17,7 +17,7 @@ Claude Code session (any cwd)
   OpenClaw-hosted Io session ─── reads MEMORY.md on prompt → acts on <current-task>
 ```
 
-On 2026-04-17, Simon's `~/git-repos/inkie-app-v2-feature3` Claude Code session hit a vite bundle error. The observer captured it. `build-context.sh` promoted it into MEMORY.md's `<current-task>` block. Io's next turn read the live block, decided "fix npm run dev vite corruption" was its job, and tried to execute `pnpm add @dnd-kit/*` + `npm run dev` against Simon's working repo via OpenClaw's exec tool. io-auto-mode flagged the unfamiliar path → Telegram approval requests fired.
+On 2026-04-17, a project at `~/git-repos/<some-other-project>` Claude Code session hit a vite bundle error. The observer captured it. `build-context.sh` promoted it into MEMORY.md's `<current-task>` block. Io's next turn read the live block, decided "fix npm run dev vite corruption" was its job, and tried to execute `pnpm add @dnd-kit/*` + `npm run dev` against the project's working repo via OpenClaw's exec tool. io-auto-mode flagged the unfamiliar path → Telegram approval requests fired.
 
 The memory pipeline worked flawlessly. The **semantics** were wrong: the observer emitted a `<current-task>` that wasn't Io's task.
 
@@ -45,7 +45,7 @@ The observation-prompt LLM detects agent identity by the **speaker label** used 
 
 Transcript formatting is the responsibility of the adapter:
 
-- `adapters/openclaw/hooks/hooks/io-observer/handler.ts::triggerObservation` → formats with `Simon:` / `Io:` (OpenClaw's canonical labels)
+- `adapters/openclaw/hooks/hooks/io-observer/handler.ts::triggerObservation` → formats with `{USER_NAME}:` / `{AGENT_NAME}:` (substituted from env vars; see template `OBSERVATION-PROMPT.md`)
 - `adapters/claude-code/src/observe-trigger.ts::formatTranscript` → formats with `User:` / `Assistant:` (Claude Code's canonical labels)
 
 Both adapters therefore give the LLM an unambiguous signal. Any future adapter must choose labels that make the agent's identity clear at the transcript level.
@@ -93,7 +93,7 @@ See [project_multi_agent_worktree_architecture.md](./memory/project_multi_agent_
 
 This spec addresses the **observation stage**. The `<current-task>` block still lands in MEMORY.md for Io's sessions. Two downstream concerns are deliberately left open:
 
-1. **Task-action boundary in Io's identity.** Even with correct observations, Io's identity prompt could be strengthened to treat `<current-task>` as *a hint it saw*, not *a command*. E.g., "check with Simon before acting on a task that references a directory outside your usual workspace." Tightens the safety gate a level deeper.
+1. **Task-action boundary in Io's identity.** Even with correct observations, Io's identity prompt could be strengthened to treat `<current-task>` as *a hint it saw*, not *a command*. E.g., "check with the user before acting on a task that references a directory outside your usual workspace." Tightens the safety gate a level deeper.
 2. **Retrospective cleanup.** Existing MEMORY.md may already contain cross-contaminated `<current-task>` entries from before this fix. `build-context.sh` will overwrite on the next observation cycle, so this resolves naturally. If that cycle doesn't fire soon, manual trim of MEMORY.md is the fix.
 
 ## 7. Changelog

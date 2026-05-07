@@ -34,8 +34,8 @@ When thresholds hit:
 
 1. Format accumulated messages into conversation transcript:
    ```
-   [HH:MM] Simon: message text
-   [HH:MM] Io: response text
+   [HH:MM] {USER_NAME}: message text
+   [HH:MM] {AGENT_NAME}: response text
    ```
 2. Write transcript to `/tmp/obs-input-{timestamp}.txt`
 3. Call Gemini Flash (`gemini-2.0-flash`) with the observation prompt from `memory/OBSERVATION-PROMPT.md`
@@ -155,7 +155,7 @@ function triggerObservation(): void {
   const transcript = buffer
     .map((m) => {
       const t = new Date(m.timestamp).toISOString().slice(11, 16);
-      const speaker = m.role === "user" ? "Simon" : "Io";
+      const speaker = m.role === "user" ? (process.env.USER_NAME || "User") : (process.env.AGENT_NAME || "Agent");
       return `[${t}] ${speaker}: ${m.content}`;
     })
     .join("\n\n");

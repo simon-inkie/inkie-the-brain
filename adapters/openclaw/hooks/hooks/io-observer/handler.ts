@@ -220,7 +220,7 @@ function triggerObservation(pointer: Pointer): void {
   const transcript = capped
     .map((m) => {
       const t = m.timestamp.slice(11, 16); // HH:MM from ISO
-      const speaker = m.role === "user" ? "Simon" : "Io";
+      const speaker = m.role === "user" ? (process.env.USER_NAME || "User") : (process.env.AGENT_NAME || "Agent");
       return `[${t}] ${speaker}: ${m.content}`;
     })
     .join("\n\n");
@@ -321,7 +321,7 @@ function migrateLegacyBuffer(): void {
         .map(
           (m: { role: string; content: string; timestamp: number }) => {
             const t = new Date(m.timestamp).toISOString().slice(11, 16);
-            const speaker = m.role === "user" ? "Simon" : "Io";
+            const speaker = m.role === "user" ? (process.env.USER_NAME || "User") : (process.env.AGENT_NAME || "Agent");
             return `[${t}] ${speaker}: ${m.content}`;
           },
         )
