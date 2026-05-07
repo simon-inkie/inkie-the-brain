@@ -4,7 +4,7 @@ import { createHash } from "crypto";
 import { config } from "../config.js";
 import { embedTexts } from "../embedder/text.js";
 import { ensureCollections, client, getCollectionPointCount } from "../qdrant/client.js";
-import { discoverCCSessions, type DiscoveredSession } from "./cc-agent-mapping.js";
+import { discoverCCSessions, type DiscoveredSession } from "./cc-session-discovery.js";
 
 // --- Types ---
 
