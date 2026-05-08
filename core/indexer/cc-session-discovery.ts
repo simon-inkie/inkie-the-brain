@@ -1,6 +1,6 @@
 import { homedir } from "os";
-import { join } from "path";
-import { readdir, stat } from "fs/promises";
+import { basename, join } from "path";
+import { readdir, readFile, stat } from "fs/promises";
 
 const CC_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -14,9 +14,17 @@ export interface DiscoveredSession {
 /**
  * Discover Claude Code session JSONL files for indexing.
  *
- * Single-agent v0: every session is attributed to `process.env.AGENT_NAME`
- * (defaulting to `"default"` if unset). Multi-agent auto-mapping by project
- * dir is deferred to v1.
+ * Per-session agent attribution falls through this chain:
+ *   1. Read the JSONL's first line for `cwd`. If found, take the *basename*
+ *      of that path — for a session that ran in `~/agents/aldus/`, that's
+ *      `aldus`. For `~/git-repos/inkie-worker/`, that's `inkie-worker`.
+ *      One agent per working directory: simple, conventional, no config.
+ *   2. Fall back to the indexer's own `process.env.AGENT_NAME`.
+ *   3. Fall back to the literal string `"default"`.
+ *
+ * Multi-agent users who keep each agent in its own dir get correct
+ * attribution automatically (no config needed). Single-dir users get a
+ * single bucket per dir, or set `AGENT_NAME` globally to override.
  *
  * Subagent files are skipped — parent sessions reference them in their
  * summaries; indexing both would double-count.
@@ -26,10 +34,14 @@ export async function discoverCCSessions(): Promise<{
   skippedDirs: string[];
   unmappedDirs: string[];
 }> {
-  const agentName = process.env.AGENT_NAME ?? "default";
+  const fallbackAgentName = process.env.AGENT_NAME ?? "default";
   const sessions: DiscoveredSession[] = [];
   const skippedDirs: string[] = [];
   const unmappedDirs: string[] = [];
+
+  // Cache project-dir → resolved agent name. All sessions in the same CC
+  // project dir share the same `cwd`, so we only need to resolve once.
+  const dirAgentCache = new Map<string, string>();
 
   let dirs: string[];
   try {
@@ -62,6 +74,13 @@ export async function discoverCCSessions(): Promise<{
     for (const file of jsonlFiles) {
       const filePath = join(dirPath, file);
       const sessionId = file.replace(".jsonl", "");
+
+      let agentName = dirAgentCache.get(dirName);
+      if (agentName === undefined) {
+        agentName = await resolveAgentForProjectDir(filePath, fallbackAgentName);
+        dirAgentCache.set(dirName, agentName);
+      }
+
       sessions.push({
         projectDir: dirName,
         agentName,
@@ -72,4 +91,28 @@ export async function discoverCCSessions(): Promise<{
   }
 
   return { sessions, skippedDirs, unmappedDirs };
+}
+
+/**
+ * Read the first JSONL line, extract `cwd`, return its basename. This is
+ * the agent name. Falls back if anything is missing.
+ */
+async function resolveAgentForProjectDir(
+  jsonlPath: string,
+  fallback: string,
+): Promise<string> {
+  try {
+    const content = await readFile(jsonlPath, "utf-8");
+    const firstLine = content.split("\n", 1)[0];
+    if (firstLine) {
+      const parsed = JSON.parse(firstLine);
+      if (typeof parsed?.cwd === "string" && parsed.cwd.length > 0) {
+        const name = basename(parsed.cwd);
+        if (name && name !== "/" && name !== ".") return name;
+      }
+    }
+  } catch {
+    // Fall through
+  }
+  return fallback;
 }
