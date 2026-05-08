@@ -1,12 +1,13 @@
 {
   "name": "the-brain",
   "version": "0.2.0",
-  "description": "Unified memory + context engine for agentic CLIs. Ships as OpenClaw plugin + hook pack today; Claude Code adapter later.",
+  "description": "Long-term memory for AI coding agents. Survives compaction. Searchable across sessions. Filesystem-first.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

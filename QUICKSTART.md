@@ -162,12 +162,12 @@ Restart Claude Code so the MCP server registers.
 
 ```bash
 # Index everything currently on disk
-pnpm cli index
+pnpm index
 
 # expected: lines like "✓ indexed N points into agent-observations" etc.
 
 # First semantic search
-pnpm cli search "hello"
+pnpm search "hello"
 
 # expected: ranked results from anything you have in your brain vault
 # (may be empty on a fresh install — that's fine)
@@ -195,7 +195,7 @@ ls -la ~/.the-brain/agents/default/memory/observations/
 Then verify the next session sees it:
 
 ```bash
-pnpm cli search "octopus"
+pnpm search "octopus"
 # expected: the observation showing up in results
 ```
 
@@ -237,7 +237,7 @@ You should see `Stop` events on every turn-end. If nothing appears, the hook isn
 
 **MCP server not showing up in Claude Code** — restart Claude Code after editing `~/.claude/settings.json`. Confirm with `claude mcp list` (or whichever your version's command is).
 
-**Search returns nothing** — make sure you ran `pnpm cli index` at least once. The first index can take a few minutes if you have a populated `~/brain/` vault.
+**Search returns nothing** — make sure you ran `pnpm index` at least once. The first index can take a few minutes if you have a populated `~/brain/` vault.
 
 ---
 

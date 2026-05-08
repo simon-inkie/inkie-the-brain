@@ -71,10 +71,10 @@ echo 'GEMINI_API_KEY=your-key-here' >> ~/.the-brain/.env
 # Edit ~/.claude/settings.json — add UserPromptSubmit, Stop, PreCompact
 
 # 5. First index
-pnpm cli index
+pnpm index
 
 # 6. Verify
-pnpm cli search "your query"
+pnpm search "your query"
 ```
 
 ---
