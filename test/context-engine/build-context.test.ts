@@ -25,6 +25,13 @@ const BUILD_CONTEXT_SH = fileURLToPath(
   ),
 );
 
+const LOG_SH = fileURLToPath(
+  new URL(
+    "../../adapters/openclaw/hooks/memory-tools/_log.sh",
+    import.meta.url,
+  ),
+);
+
 let testDir: string;
 let workspaceDir: string;
 let memoryDir: string;
@@ -65,6 +72,13 @@ done
   const buildContextSrc = await readFile(BUILD_CONTEXT_SH, "utf8");
   await writeFile(join(toolsDir, "build-context.sh"), buildContextSrc);
   await chmod(join(toolsDir, "build-context.sh"), 0o755);
+
+  // build-context.sh sources _log.sh from $SCRIPT_DIR — copy it alongside.
+  // Without this the source fails silently (2>/dev/null || true) and `log`
+  // is undefined → tests exit with "log: command not found".
+  const logShSrc = await readFile(LOG_SH, "utf8");
+  await writeFile(join(toolsDir, "_log.sh"), logShSrc);
+  await chmod(join(toolsDir, "_log.sh"), 0o755);
 
   // Default live-state.json
   await writeFile(

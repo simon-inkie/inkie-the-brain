@@ -23,6 +23,10 @@ describe("user-prompt-submit — run()", () => {
     // Force resolution to this project's memory dir
     delete process.env.BRAIN_MEMORY_DIR;
     delete process.env.BRAIN_MAX_INJECTED_CHARS;
+    // Tier-0 AGENT_NAME would otherwise resolve to a real agent's silo,
+    // bypassing this test's temp dir entirely.
+    delete process.env.AGENT_NAME;
+    delete process.env.USER_NAME;
   });
 
   afterEach(() => {
@@ -80,9 +84,12 @@ describe("user-prompt-submit — run()", () => {
 });
 
 describe("wrapForInjection", () => {
-  it("wraps with the-brain tags", () => {
-    expect(wrapForInjection("hello")).toBe(
-      "<the-brain>\nhello\n</the-brain>",
-    );
+  it("wraps with the-brain tags and a fresh-now line", () => {
+    const wrapped = wrapForInjection("hello");
+    expect(wrapped.startsWith("<the-brain>\n")).toBe(true);
+    expect(wrapped.endsWith("\nhello\n</the-brain>")).toBe(true);
+    // Implementation prepends a `> **NOW: ...**` line so the model has an
+    // authoritative current time even if MEMORY.md's baked-in date is stale.
+    expect(wrapped).toMatch(/> \*\*NOW: /);
   });
 });

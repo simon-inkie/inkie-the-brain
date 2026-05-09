@@ -19,7 +19,10 @@ import {
  */
 function buildTranscript(turns: number, contentLen = 40): string {
   const lines: string[] = [];
-  const base = new Date("2026-04-17T10:00:00Z").getTime();
+  // Use a recent base — old hardcoded date would trigger the age-threshold
+  // (oldest unobserved message age >= maxAgeMs) on tests that expect "below
+  // thresholds". Keep timestamps within the same minute as 'now'.
+  const base = Date.now() - turns * 60_000;
   for (let i = 0; i < turns; i++) {
     lines.push(
       JSON.stringify({
@@ -74,6 +77,8 @@ describe("on-stop — run()", () => {
     // Prevent resolver from finding a real ~/.the-brain/memory
     process.env.BRAIN_MEMORY_DIR = memoryDir;
     delete process.env.BRAIN_DEBUG;
+    delete process.env.AGENT_NAME;
+    delete process.env.USER_NAME;
   });
 
   afterEach(() => {
@@ -233,13 +238,17 @@ describe("on-stop — run()", () => {
 });
 
 describe("sessionKeyFor", () => {
-  it("slugifies the project dir and appends session id", () => {
+  // The implementation deliberately ignores projectDir (kept in the signature
+  // for back-compat) — including it caused pointer fragmentation when an
+  // agent cd'd between worktrees mid-session. See observe-trigger.ts.
+  it("returns cc:<sessionId>, ignoring projectDir", () => {
     expect(sessionKeyFor("/home/test-user/io-projects/the-brain", "abc123")).toBe(
-      "cc:home-simon-io-projects-the-brain:abc123",
+      "cc:abc123",
     );
   });
 
-  it("strips leading slashes from the slug", () => {
-    expect(sessionKeyFor("/tmp/proj", "s1")).toBe("cc:tmp-proj:s1");
+  it("returns the same key regardless of projectDir", () => {
+    expect(sessionKeyFor("/tmp/proj", "s1")).toBe("cc:s1");
+    expect(sessionKeyFor("/totally/different", "s1")).toBe("cc:s1");
   });
 });

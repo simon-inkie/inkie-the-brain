@@ -70,10 +70,14 @@ describe("on-pre-compact — force-fire semantics", () => {
     process.env.BRAIN_TOOLS_DIR = toolsDir;
     process.env.BRAIN_MEMORY_DIR = memoryDir;
     delete process.env.BRAIN_DEBUG;
+    delete process.env.AGENT_NAME;
+    delete process.env.USER_NAME;
   });
 
   afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
+    // observe.sh spawns detached and may still be writing files to testDir
+    // when this fires — maxRetries handles the ENOTEMPTY race.
+    rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     process.env = { ...prevEnv };
   });
 
