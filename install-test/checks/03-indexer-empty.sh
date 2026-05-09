@@ -5,9 +5,11 @@
 # The bar is "doesn't crash on the empty case" — the L4 check verifies
 # actual indexing semantics with fixtures.
 
-set -euo pipefail
+set -uo pipefail
 
-cd /workspace
+source "$(dirname "$0")/_lib.sh"
+
+cd "${WORKSPACE:-/workspace}"
 
 if [ -z "${GEMINI_API_KEY:-}" ]; then
   echo "  - GEMINI_API_KEY unset — skipping (indexer requires embeddings)"
@@ -27,11 +29,7 @@ export BRAIN_VAULT_DIR="$BRAIN_DIR"
 export BRAIN_MEMORY_DIR="$SILO_DIR/memory"
 export AGENT_NAME="install-test"
 
-echo "  pnpm index (empty corpus)"
-if ! timeout 60 pnpm index 2>&1 | tail -10; then
-  echo "  ✗ indexer exited non-zero on empty corpus"
-  exit 1
-fi
+run_step "pnpm index (empty corpus)" timeout 60 pnpm index || exit $?
 echo "  ✓ indexer ran cleanly on empty corpus"
 
 # Verify Qdrant is still healthy (didn't get poisoned)

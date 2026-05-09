@@ -3,12 +3,17 @@
 #   - qdrant:     official qdrant image; the test-runner reaches it at
 #                 http://qdrant:6333 via compose internal DNS
 #
-# Run: `docker compose -f install-test/docker-compose.yml run --rm test-runner`
+# Run:   `docker compose -f install-test/docker-compose.yml run --rm test-runner`
 # Shell: `docker compose -f install-test/docker-compose.yml run --rm test-runner bash`
+#
+# The repo is bind-mounted READ-ONLY at /workspace; run.sh clones from there to
+# /tmp/work inside the container before running anything. This mirrors the
+# "user clones from their fresh checkout" path AND keeps the host's /workspace
+# (including the host's live dist/ + node_modules) safely untouched.
 
 services:
   qdrant:
-    image: qdrant/qdrant:v1.13.4
+    image: qdrant/qdrant:v1.17.0
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /healthz HTTP/1.0\\n\\n' >&3 && grep -q '200 OK\\|status' <&3"]
       interval: 2s
@@ -29,13 +34,7 @@ services:
       # host so we don't bake keys into the image.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
-      # Mount the repo read-write so `pnpm install` + `pnpm build` can write
-      # node_modules + dist into the test runner's own workspace. We use a
-      # named volume for node_modules to avoid stomping the host's copy.
-      - ..:/workspace
-      - the-brain-test-node-modules:/workspace/node_modules
-      - the-brain-test-dist:/workspace/dist
-
-volumes:
-  the-brain-test-node-modules:
-  the-brain-test-dist:
+      # Repo bind-mounted read-only — run.sh git-clones it into /tmp/work
+      # for the actual install. This isolates the test from the host's
+      # working tree (dist/, node_modules/) and matches the user-side path.
+      - ..:/workspace:ro

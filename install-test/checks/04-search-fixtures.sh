@@ -6,9 +6,11 @@
 # This is the "the brain actually works" test — the previous three only
 # verified the install path mechanically. Here we verify the round-trip.
 
-set -euo pipefail
+set -uo pipefail
 
-cd /workspace
+source "$(dirname "$0")/_lib.sh"
+
+cd "${WORKSPACE:-/workspace}"
 
 if [ -z "${GEMINI_API_KEY:-}" ]; then
   echo "  - GEMINI_API_KEY unset — skipping (search requires real embeddings)"
@@ -31,11 +33,7 @@ export BRAIN_VAULT_DIR="$BRAIN_DIR"
 export BRAIN_MEMORY_DIR="$SILO_DIR/memory"
 export AGENT_NAME="install-test"
 
-echo "  pnpm index"
-if ! timeout 90 pnpm index 2>&1 | tail -5; then
-  echo "  ✗ indexer failed on fixture corpus"
-  exit 1
-fi
+run_step "pnpm index (fixture corpus)" timeout 90 pnpm index || exit $?
 
 # Search for a phrase that's distinctively in one of the fixtures.
 echo "  pnpm search 'octopus distributed cognition'"

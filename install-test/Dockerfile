@@ -6,7 +6,11 @@
 # Pair with docker-compose.yml — this image talks to a sidecar Qdrant service
 # at http://qdrant:6333 (compose internal DNS).
 
-FROM ubuntu:24.04@sha256:80dd3c3b9c6cecb9f1667e9290b3bc61b78c2678c02cbdae5f0fea92cc6734ab
+# Tag-only (no digest pin) — install-test wants to surface base-image
+# regressions early, not hide them behind a frozen pin. CI runs the harness
+# every PR + nightly, so any breaking change in a base-image update gets
+# caught at the next run rather than in production six months later.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_VERSION=22.11.0 \
@@ -35,9 +39,12 @@ WORKDIR /workspace
 # The repo is mounted in at /workspace by docker-compose, not COPY'd, so the
 # harness exercises the same install path a stranger cloning the repo follows.
 # Default command is the runner; override via `docker compose run` for shell.
-COPY checks/ /opt/install-test/checks/
-COPY fixtures/ /opt/install-test/fixtures/
-COPY run.sh /opt/install-test/run.sh
+#
+# Build context is the repo root (set via `context: ..` in compose), so COPY
+# paths are repo-relative.
+COPY install-test/checks/ /opt/install-test/checks/
+COPY install-test/fixtures/ /opt/install-test/fixtures/
+COPY install-test/run.sh /opt/install-test/run.sh
 RUN chmod +x /opt/install-test/run.sh /opt/install-test/checks/*.sh
 
 CMD ["/opt/install-test/run.sh"]

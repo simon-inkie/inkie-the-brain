@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-cd /workspace
+cd "${WORKSPACE:-/workspace}"
 
 echo "  qdrant healthz"
 if ! curl -sf "${QDRANT_URL}/healthz" >/dev/null; then
@@ -32,11 +32,11 @@ fi
 
 echo "  MCP server tools/list handshake"
 # Send a minimal tools/list request to the MCP server and look for the
-# `remembering` tool in the response. Use a 5s timeout to avoid hanging
-# forever if the server can't boot.
+# `remembering` tool in the response. The server runs straight from
+# source via tsx — no separate build step. 10s timeout to avoid hangs.
 RESPONSE=$(timeout 10 bash -c '
   printf %s "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"install-test\",\"version\":\"0\"}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n" \
-    | node dist/mcp/server.js 2>/dev/null
+    | npx --yes tsx mcp/server.ts 2>/dev/null
 ' || true)
 
 if echo "$RESPONSE" | grep -q '"name":"remembering"'; then

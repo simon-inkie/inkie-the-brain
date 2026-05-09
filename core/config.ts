@@ -120,7 +120,10 @@ const workspaceRoot = join(home, ".openclaw", "workspace");
 // ---------------------------------------------------------------------------
 
 export const config = {
-  qdrantUrl: "http://localhost:6333",
+  // QDRANT_URL env override — defaults to local Docker Qdrant on 6333.
+  // Documented in QUICKSTART for Qdrant Cloud users (Path C escape hatch)
+  // and the install-test harness, which talks to a sidecar at http://qdrant:6333.
+  qdrantUrl: process.env.QDRANT_URL || "http://localhost:6333",
   qdrantApiKey: process.env.QDRANT_API_KEY || "",
 
   embeddingModel: "gemini-embedding-2-preview",

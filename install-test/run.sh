@@ -4,22 +4,50 @@
 #
 # Each check is a self-contained script under /opt/install-test/checks/.
 # Checks emit their own ✓/✗ lines while running; this script aggregates.
+#
+# Workspace handling: the repo is bind-mounted read-only at /workspace.
+# We git-clone from there into /tmp/work (mirroring "user clones the repo")
+# and run all checks from /tmp/work. Host /workspace stays pristine.
 
 set -uo pipefail
 
 CHECKS_DIR="/opt/install-test/checks"
-WORKSPACE="${WORKSPACE:-/workspace}"
+SOURCE="${SOURCE:-/workspace}"
+WORKSPACE=$(mktemp -d /tmp/the-brain-work-XXXX)
 RESULTS=()
 FAILED=0
 
-cd "$WORKSPACE"
+trap 'rm -rf "$WORKSPACE"' EXIT
 
 echo "════════════════════════════════════════════════════════════"
 echo "  the-brain — install-test"
-echo "  workspace: $WORKSPACE"
+echo "  source:    $SOURCE (read-only bind mount)"
+echo "  workspace: $WORKSPACE (fresh clone, ephemeral)"
 echo "  qdrant:    ${QDRANT_URL:-not set}"
-echo "  gemini:    $([ -n "${GEMINI_API_KEY:-}" ] && echo 'set' || echo 'NOT SET — L2/L3/L4 will be skipped')"
+echo "  gemini:    $([ -n "${GEMINI_API_KEY:-}" ] && echo 'set' || echo 'NOT SET — L2/L3/L4 will skip')"
 echo "════════════════════════════════════════════════════════════"
+echo
+
+# Clone the repo from the read-only bind mount into the ephemeral workspace.
+# `git clone <local-path> <dest>` only copies tracked files — node_modules/
+# and dist/ on the host are NOT pulled in, so the test starts from a fresh
+# clone-shaped checkout the same way a user would.
+#
+# `safe.directory='*'` is needed because the bind-mounted repo's files are
+# owned by the host UID, not the container's root — git's ownership-check
+# trips on that otherwise. The * wildcard is appropriate here because we
+# fully trust the bind-mounted source by definition.
+echo "── prep: clone $SOURCE → $WORKSPACE ──"
+git config --global --add safe.directory "$SOURCE"
+git config --global --add safe.directory "$SOURCE/.git"
+git clone --quiet "$SOURCE" "$WORKSPACE" 2>&1 | sed 's/^/    /' || {
+  echo "    ✗ clone failed"
+  exit 1
+}
+echo "    ✓ cloned ($(git -C "$WORKSPACE" log --oneline -1))"
+echo
+
+export WORKSPACE  # checks read this
 
 run_check() {
   local script="$1"

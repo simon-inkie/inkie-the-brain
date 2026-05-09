@@ -136,7 +136,7 @@ Replace `<absolute-path-to>` with the result of `pwd` from your `the-brain` chec
 
 ## 5. Wire the MCP server
 
-The MCP server exposes the `remembering` tool to any MCP client (Claude Code, Cursor, etc.).
+The MCP server exposes the `remembering` tool to any MCP client (Claude Code, Cursor, etc.). It runs straight from source via `tsx` — there's no separate build step for it.
 
 In `~/.claude/settings.json` (same file, separate section):
 
@@ -144,8 +144,8 @@ In `~/.claude/settings.json` (same file, separate section):
 {
   "mcpServers": {
     "the-brain": {
-      "command": "node",
-      "args": ["<absolute-path-to>/the-brain/dist/mcp/server.js"],
+      "command": "npx",
+      "args": ["tsx", "<absolute-path-to>/the-brain/mcp/server.ts"],
       "env": {
         "GEMINI_API_KEY": "your-gemini-key"
       }
@@ -154,7 +154,7 @@ In `~/.claude/settings.json` (same file, separate section):
 }
 ```
 
-Restart Claude Code so the MCP server registers.
+Restart Claude Code so the MCP server registers. Confirm with `claude mcp list` (or whichever your version's command is) — you should see `the-brain` listed.
 
 ---
 
