@@ -90,7 +90,11 @@ for (const a of agents) {
 // ---------------------------------------------------------------------------
 // Brain — symlink-covered, single source of truth
 // ---------------------------------------------------------------------------
-const brainRoot = join(home, "brain");
+// BRAIN_VAULT_DIR env wins (used by install-test harness, also Path-C
+// escape hatch for unusual setups). Default: ~/brain (Simon's symlinked
+// Obsidian vault). Legacy fallback: ~/.openclaw/workspace/brain when the
+// default doesn't exist.
+const brainRoot = process.env.BRAIN_VAULT_DIR || join(home, "brain");
 const brainExists = existsSync(brainRoot);
 
 const effectiveBrainRoot = brainExists
