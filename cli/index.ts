@@ -380,6 +380,20 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Error:", err.message || err);
+  console.error("Error:", err?.message || err);
+  let cur: any = err?.cause;
+  let depth = 0;
+  while (cur && depth < 5) {
+    console.error(`  Cause [${depth}]:`, cur?.message || cur);
+    if (cur?.code) console.error(`    code:     ${cur.code}`);
+    if (cur?.errno) console.error(`    errno:    ${cur.errno}`);
+    if (cur?.syscall) console.error(`    syscall:  ${cur.syscall}`);
+    if (cur?.hostname) console.error(`    hostname: ${cur.hostname}`);
+    if (cur?.address) console.error(`    address:  ${cur.address}`);
+    if (cur?.port) console.error(`    port:     ${cur.port}`);
+    cur = cur?.cause;
+    depth++;
+  }
+  if (err?.stack) console.error("\nStack:\n" + err.stack);
   process.exit(1);
 });
