@@ -31,20 +31,41 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
 fi
 
 echo "  MCP server tools/list handshake"
-# Send a minimal tools/list request to the MCP server and look for the
-# `remembering` tool in the response. The server runs straight from
-# source via tsx — no separate build step. 10s timeout to avoid hangs.
-RESPONSE=$(timeout 10 bash -c '
-  printf %s "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"install-test\",\"version\":\"0\"}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n" \
-    | npx --yes tsx mcp/server.ts 2>/dev/null
-' || true)
+# Send initialize + initialized + tools/list to the MCP server and check
+# the `remembering` tool appears in the response.
+#
+# Pipe shape: (printf; sleep 5) | npx tsx mcp/server.ts
+#   - printf writes the 3 JSON-RPC messages
+#   - sleep 5 keeps the pipe open so the server can write responses
+#     before stdin closes (MCP SDK exits on stdin EOF)
+#   - 30s outer timeout — cold tsx start (~3-5s) + ensureCollections
+#     qdrant round-trip (~2-5s) + handshake + read budget
+#
+# Stderr captured to a file so the qdrant client's "Failed to obtain
+# server version" warnings (and any real errors) are available on
+# failure without polluting the success path.
+STDOUT_FILE=$(mktemp)
+STDERR_FILE=$(mktemp)
+# shellcheck disable=SC2064
+trap "rm -f '$STDOUT_FILE' '$STDERR_FILE'" EXIT
 
-if echo "$RESPONSE" | grep -q '"name":"remembering"'; then
+(
+  printf %s '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"install-test","version":"0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+'
+  sleep 5
+) | timeout 30 npx --yes tsx mcp/server.ts > "$STDOUT_FILE" 2> "$STDERR_FILE" || true
+
+if grep -q '"name":"remembering"' "$STDOUT_FILE"; then
   echo "  ✓ MCP server lists the remembering tool"
 else
   echo "  ✗ MCP server did not list the remembering tool"
-  echo "  --- response snippet ---"
-  echo "$RESPONSE" | head -c 500
+  echo "  --- stdout (first 800 chars) ---"
+  head -c 800 "$STDOUT_FILE"
+  echo
+  echo "  --- stderr (first 800 chars) ---"
+  head -c 800 "$STDERR_FILE"
   echo
   exit 1
 fi
