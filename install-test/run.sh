@@ -40,7 +40,13 @@ echo
 echo "── prep: clone $SOURCE → $WORKSPACE ──"
 git config --global --add safe.directory "$SOURCE"
 git config --global --add safe.directory "$SOURCE/.git"
-git clone --quiet "$SOURCE" "$WORKSPACE" 2>&1 | sed 's/^/    /' || {
+#
+# --no-hardlinks: git's default --local clone mode hardlinks individual loose
+# objects from the source. If the source repo just ran `git gc` (auto-pack on
+# commit), most objects are now in pack files, not loose — and the hardlink
+# attempt fails with a confusing "No such file or directory" on the loose path.
+# --no-hardlinks forces a proper copy that reads pack files correctly.
+git clone --no-hardlinks --quiet "$SOURCE" "$WORKSPACE" 2>&1 | sed 's/^/    /' || {
   echo "    ✗ clone failed"
   exit 1
 }
