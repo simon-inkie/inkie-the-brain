@@ -1,5 +1,5 @@
-import { readFile, writeFile, readdir, stat } from "fs/promises";
-import { join, basename } from "path";
+import { readFile, writeFile, readdir, stat, mkdir } from "fs/promises";
+import { join, basename, dirname } from "path";
 import { createHash } from "crypto";
 import { config } from "../config.js";
 import { embedTexts } from "../embedder/text.js";
@@ -81,6 +81,7 @@ async function loadState(): Promise<MessageIndexState> {
 }
 
 async function saveState(state: MessageIndexState): Promise<void> {
+  await mkdir(dirname(config.messageIndexing.stateFile), { recursive: true });
   await writeFile(
     config.messageIndexing.stateFile,
     JSON.stringify(state, null, 2)

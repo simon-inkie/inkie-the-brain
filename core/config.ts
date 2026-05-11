@@ -116,6 +116,18 @@ const messagesPath = agentSessionsDirs.length > 0
 const workspaceRoot = join(home, ".openclaw", "workspace");
 
 // ---------------------------------------------------------------------------
+// Indexer state directory — where the file/message/asset index state JSONs
+// live. Default: `~/.the-brain/state/` (matches the rest of `~/.the-brain/`).
+// Legacy default: `~/io-data/` — kept transparently when that directory
+// exists, so Simon's existing local setup keeps working without migration.
+// Override with BRAIN_STATE_DIR (used by the install-test harness).
+// ---------------------------------------------------------------------------
+const stateDir = process.env.BRAIN_STATE_DIR
+  || (existsSync(join(home, "io-data"))
+        ? join(home, "io-data")
+        : join(home, ".the-brain", "state"));
+
+// ---------------------------------------------------------------------------
 // Final config
 // ---------------------------------------------------------------------------
 
@@ -159,7 +171,7 @@ export const config = {
     scoreThreshold: 0.3,
   },
 
-  indexStatePath: join(home, "io-data", "io-memory-index-state.json"),
+  indexStatePath: join(stateDir, "io-memory-index-state.json"),
 
   messageIndexing: {
     minContentLength: 20,
@@ -172,7 +184,7 @@ export const config = {
       /^System: \[/,
     ],
     skipToolOnlyMessages: true,
-    stateFile: join(home, "io-data", "io-message-index-state.json"),
+    stateFile: join(stateDir, "io-message-index-state.json"),
   },
 
   assetIndexing: {
@@ -181,7 +193,7 @@ export const config = {
     audioExtensions: [".mp3", ".wav", ".m4a", ".ogg", ".webm"],
     maxFileSizeMb: 50,
     maxPdfPages: 50,
-    stateFile: join(home, "io-data", "io-asset-index-state.json"),
+    stateFile: join(stateDir, "io-asset-index-state.json"),
     descriptionModel: "gemini-2.5-flash",
   },
 

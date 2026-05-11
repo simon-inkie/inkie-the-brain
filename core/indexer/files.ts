@@ -1,5 +1,5 @@
-import { readFile, writeFile, access, readdir, stat } from "fs/promises";
-import { join, relative, basename } from "path";
+import { readFile, writeFile, access, readdir, stat, mkdir } from "fs/promises";
+import { join, relative, basename, dirname } from "path";
 import { createHash } from "crypto";
 import { glob } from "glob";
 import matter from "gray-matter";
@@ -120,6 +120,7 @@ async function loadState(): Promise<IndexState> {
 }
 
 async function saveState(state: IndexState): Promise<void> {
+  await mkdir(dirname(config.indexStatePath), { recursive: true });
   await writeFile(config.indexStatePath, JSON.stringify(state, null, 2));
 }
 

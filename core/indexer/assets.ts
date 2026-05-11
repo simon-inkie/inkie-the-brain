@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat } from "fs/promises";
+import { readFile, writeFile, stat, mkdir } from "fs/promises";
 import { join, relative, basename, extname, dirname } from "path";
 import { createHash } from "crypto";
 import { glob } from "glob";
@@ -55,6 +55,7 @@ async function loadState(): Promise<AssetIndexState> {
 }
 
 async function saveState(state: AssetIndexState): Promise<void> {
+  await mkdir(dirname(config.assetIndexing.stateFile), { recursive: true });
   await writeFile(
     config.assetIndexing.stateFile,
     JSON.stringify(state, null, 2)
