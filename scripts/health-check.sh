@@ -126,7 +126,6 @@ for agent in io doctor2 aldus andor hopkins; do
   obs=$(ls "$silo/memory/observations/" 2>/dev/null | wc -l)
   ref=$(ls "$silo/memory/reflections/" 2>/dev/null | wc -l)
   mem_file="$silo/MEMORY.md"
-  inbox=$(ls "$silo/inbox/" 2>/dev/null | wc -l)
 
   if [[ ! -f "$mem_file" ]]; then
     echo "  $FAIL $agent: MEMORY.md missing"
@@ -147,7 +146,7 @@ for agent in io doctor2 aldus andor hopkins; do
   else
     age_label="${mem_age_h}h"
     [[ $mem_age_h -eq 0 ]] && age_label="$(( (NOW - mem_mtime) / 60 ))m"
-    echo "  $PASS $agent: obs=$obs ref=$ref MEMORY.md=${mem_size}b age=${age_label} inbox=$inbox"
+    echo "  $PASS $agent: obs=$obs ref=$ref MEMORY.md=${mem_size}b age=${age_label}"
   fi
 done
 
