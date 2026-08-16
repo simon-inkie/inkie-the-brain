@@ -11,8 +11,8 @@ Guide the user through setting up a dedicated agent memory silo for the current 
 
 Run these checks silently. Surface the first one that fails; skip the skill's main flow until the user fixes it.
 
-1. **the-brain repo checked out.** Expected at `~/io-projects/the-brain/`. If missing, tell the user to clone `git@gitlab.com:simondixon/the-brain.git` there first.
-2. **Build exists.** Expected `~/io-projects/the-brain/dist/claude-code/bin/user-prompt-submit.sh`. If missing, run `cd ~/io-projects/the-brain && pnpm install && node scripts/build.mjs` for them.
+1. **the-brain repo checked out.** Expected at `~/the-brain/` unless the user says otherwise. If missing, tell the user to clone `https://github.com/simon-inkie/inkie-the-brain.git` first. Use their actual checkout path in the steps below.
+2. **Build exists.** Expected `<repo>/dist/claude-code/bin/user-prompt-submit.sh`. If missing, run `cd <repo> && pnpm install && node scripts/build.mjs` for them.
 3. **Hooks wired into ~/.claude/settings.json.** Grep for `the-brain/dist/claude-code/bin/user-prompt-submit.sh` in `~/.claude/settings.json`. If missing, tell the user the permanent install hasn't been done yet — that's a separate one-time step (see the repo's README) and NOT part of this skill.
 
 If all three pass, continue.
@@ -21,7 +21,7 @@ If all three pass, continue.
 
 Ask the user (ONE question, AskUserQuestion if available):
 
-> What should this agent be called? The name becomes the memory dir under `~/.the-brain/agents/<name>/` and sticks with the persona across renames/moves of the worktree. Examples: `voice-polish-bot`, `ink-322-video`, `the-brain-dev`.
+> What should this agent be called? The name becomes the memory dir under `~/.the-brain/agents/<name>/` and sticks with the persona across renames/moves of the worktree. Examples: `voice-polish-bot`, `video-pipeline`, `the-brain-dev`.
 
 Validation (enforce silently, don't re-prompt unless violated):
 - Alphanumeric + hyphens only
@@ -49,7 +49,7 @@ Before creating anything:
 From the the-brain repo dir, run:
 
 ```bash
-cd ~/io-projects/the-brain
+cd <repo>
 pnpm agent init <name> --link <target>
 ```
 
@@ -73,7 +73,8 @@ Silent checks — only surface if one fails:
 
 1. `~/.the-brain/agents/<name>/memory/OBSERVATION-PROMPT.md` exists
 2. `~/.the-brain/agents/<name>/memory/live-state.json` exists and is valid JSON
-3. `<target>/.the-brain/memory_root` exists and its first line resolves to step-1's dir
+3. `~/.the-brain/agents/<name>/MEMORY.md` exists and contains the anchor comments
+4. `<target>/.the-brain/memory_root` exists and its first line resolves to step-1's dir
 
 ## Tell the user what happens next
 

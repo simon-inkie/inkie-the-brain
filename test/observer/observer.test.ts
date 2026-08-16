@@ -80,7 +80,7 @@ describe("shouldSkipMessage", () => {
 
   it("keeps substantive messages", () => {
     expect(
-      shouldSkipMessage("Simon asked about the context engine plugin"),
+      shouldSkipMessage("The user asked about the context engine plugin"),
     ).toBe(false);
   });
 });

@@ -28,8 +28,9 @@ export class TheBrainEngine {
   constructor(private readonly cfg: TheBrainConfig) {}
 
   /**
-   * No-op. Io's own hooks (io-observer, io-message-indexer) handle message
-   * persistence into Qdrant and observation files. We are read-only here.
+   * No-op. The adapter's own hooks (io-observer, io-message-indexer) handle
+   * message persistence into Qdrant and observation files. We are read-only
+   * here.
    */
   async ingest(_params: {
     sessionId: string;

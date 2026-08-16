@@ -60,6 +60,15 @@ const agentReflectionDirs = agents
   .map((a) => join(a.memoryDir, "reflections"))
   .filter((p) => existsSync(p));
 
+// Per-agent references: DELIBERATE hand-written captures meant to survive
+// compaction and be findable. references/ sits BESIDE memory/ (under
+// agentRoot), not inside it, so it fell outside every source glob and was
+// unsearchable. Indexed into the reflections collection — it is curated
+// durable knowledge, the same class as a reflection.
+const agentReferenceDirs = agents
+  .map((a) => join(a.agentRoot, "references"))
+  .filter((p) => existsSync(p));
+
 // Per-agent MEMORY.md files (live block at <agent>/MEMORY.md, one level above memory/).
 const agentMemoryMdPaths = agents
   .map((a) => join(a.agentRoot, "MEMORY.md"))
@@ -91,8 +100,8 @@ for (const a of agents) {
 // Brain — symlink-covered, single source of truth
 // ---------------------------------------------------------------------------
 // BRAIN_VAULT_DIR env wins (used by install-test harness, also Path-C
-// escape hatch for unusual setups). Default: ~/brain (Simon's symlinked
-// Obsidian vault). Legacy fallback: ~/.openclaw/workspace/brain when the
+// escape hatch for unusual setups). Default: ~/brain (typically a symlink to
+// an Obsidian vault). Legacy fallback: ~/.openclaw/workspace/brain when the
 // default doesn't exist.
 const brainRoot = process.env.BRAIN_VAULT_DIR || join(home, "brain");
 const brainExists = existsSync(brainRoot);
@@ -123,7 +132,7 @@ const workspaceRoot = join(home, ".openclaw", "workspace");
 // Indexer state directory — where the file/message/asset index state JSONs
 // live. Default: `~/.the-brain/state/` (matches the rest of `~/.the-brain/`).
 // Legacy default: `~/io-data/` — kept transparently when that directory
-// exists, so Simon's existing local setup keeps working without migration.
+// exists, so an existing local setup keeps working without migration.
 // Override with BRAIN_STATE_DIR (used by the install-test harness).
 // ---------------------------------------------------------------------------
 const stateDir = process.env.BRAIN_STATE_DIR
@@ -149,7 +158,10 @@ export const config = {
     brain: "brain-vault",
     observations: "io-observations",
     reflections: "io-reflections",
-    messages: "io-messages",
+    // Env-overridable so a blue-green re-index can build into a fresh
+    // collection (BRAIN_MESSAGES_COLLECTION=io-messages-v2) and then alias
+    // io-messages -> io-messages-v2 once it verifies. Default unchanged.
+    messages: process.env.BRAIN_MESSAGES_COLLECTION ?? "io-messages",
     assets: "io-assets",
   },
 
@@ -157,6 +169,7 @@ export const config = {
     brain: brainSubdirs.map((sub) => join(effectiveBrainRoot, sub)),
     observations: agentObservationDirs,
     reflections: agentReflectionDirs,
+    references: agentReferenceDirs,
     messages: messagesPath,
     assets: [join(effectiveBrainRoot, "assets")],
   },
@@ -186,9 +199,34 @@ export const config = {
       /^\[cron:/,
       /^Read HEARTBEAT\.md/,
       /^System: \[/,
+      // HARD BLOCK (defence in depth): harness-INJECTED markers that open a
+      // message. These are pure system noise, never real conversation, and
+      // indexing them is both useless and expensive — an unfiltered run can
+      // bleed six figures of embedding calls on notification wrappers alone.
+      // Blocked by content, regardless of which source dir they came from.
+      //
+      // All START-ANCHORED, deliberately. A marker that appears mid-prose (an
+      // observation prompt quoting a "Monitor event:" line, or an agent
+      // discussing <task-notification> in a design conversation) is legitimate
+      // content and MUST pass. An earlier unanchored version of this filter
+      // dropped thousands of genuine messages for exactly that reason.
+      //
+      // BOUNDARY: block only what the HARNESS injects, not what an agent
+      // authors. Agent-authored relay pings between agents are coordination
+      // signal, a different class, and are kept.
+      /^\s*<task-notification>/,
+      /^\s*<local-command-caveat>/,
+      /^\s*<command-name>/,
+      /^\s*<command-message>/,
+      /^\s*<system-reminder>/,
     ],
     skipToolOnlyMessages: true,
-    stateFile: join(stateDir, "io-message-index-state.json"),
+    // Env-overridable so a blue-green rebuild uses a FRESH state file (a full
+    // clean index, not an incremental delta against the live collection's
+    // state). Default unchanged.
+    stateFile:
+      process.env.BRAIN_MESSAGE_INDEX_STATE ??
+      join(stateDir, "io-message-index-state.json"),
   },
 
   assetIndexing: {

@@ -112,7 +112,7 @@ async function getMostRecentSessionFile(): Promise<string | null> {
   }
 }
 
-async function getLastUserMessage(since: number): Promise<{ text: string; channel: string; sender: string } | null> {
+async function getLastUserMessage(since: number): Promise<{ text: string | undefined; channel: string; sender: string } | null> {
   const sessionFile = await getMostRecentSessionFile();
   if (!sessionFile) return null;
 

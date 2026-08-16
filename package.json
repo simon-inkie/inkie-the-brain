@@ -1,8 +1,16 @@
 {
   "name": "the-brain",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Long-term memory for AI coding agents. Survives compaction. Searchable across sessions. Filesystem-first.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simon-inkie/inkie-the-brain.git"
+  },
+  "homepage": "https://github.com/simon-inkie/inkie-the-brain#readme",
+  "bugs": {
+    "url": "https://github.com/simon-inkie/inkie-the-brain/issues"
+  },
   "engines": {
     "node": ">=22.0.0"
   },

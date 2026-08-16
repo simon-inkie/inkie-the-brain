@@ -10,3 +10,7 @@ dist/
 # the-brain runtime state (external agent memory)
 .the-brain/
 memory/
+
+# Working notes and per-agent harness config: local scratch, never published.
+.notes/
+.io-auto-mode.json
