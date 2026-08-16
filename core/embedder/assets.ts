@@ -2,6 +2,7 @@ import { readFile } from "fs/promises";
 import { extname } from "path";
 import { GoogleGenAI } from "@google/genai";
 import { config } from "../config.js";
+import { isDryRun, dryRunVector, chargeTick } from "./gate.js";
 
 let ai: GoogleGenAI | null = null;
 
@@ -33,10 +34,24 @@ export function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] ?? "application/octet-stream";
 }
 
+// Asset embed cost estimate: ~$0.0001 per call (Gemini multimodal pricing).
+// We count by call (1 per asset), not chars — asset size varies but
+// telemetry gives us call-count signal for now.
+const ASSET_EMBED_COST_USD = 0.0001;
+
 /**
  * Embed an image directly via Gemini Embedding 2's multimodal support.
  */
 export async function embedImage(imagePath: string): Promise<number[]> {
+  // Gate: kill-switch + telemetry. chars=0 for binary asset (count-based cost).
+  chargeTick(1, 0, ASSET_EMBED_COST_USD);
+
+  // Dry-run: return zero-vector, no Gemini call
+  if (isDryRun()) {
+    console.error(`[embedder/assets] EMBED_DRY_RUN=true — skipping embedImage for ${imagePath}`);
+    return dryRunVector();
+  }
+
   const data = await readFile(imagePath);
   const base64 = data.toString("base64");
   const mimeType = getMimeType(imagePath);
@@ -67,6 +82,15 @@ export async function embedImageWithContext(
   imagePath: string,
   contextText: string
 ): Promise<number[]> {
+  // Gate: kill-switch + telemetry. Use contextText.length for chars (text part is billable).
+  chargeTick(1, contextText.length, ASSET_EMBED_COST_USD);
+
+  // Dry-run: return zero-vector, no Gemini call
+  if (isDryRun()) {
+    console.error(`[embedder/assets] EMBED_DRY_RUN=true — skipping embedImageWithContext for ${imagePath}`);
+    return dryRunVector();
+  }
+
   const data = await readFile(imagePath);
   const base64 = data.toString("base64");
   const mimeType = getMimeType(imagePath);
@@ -95,8 +119,15 @@ export async function embedImageWithContext(
 
 /**
  * Generate a text description of an image using Gemini generative model.
+ * Note: uses generateContent (not embedContent) — not gated by embed kill-switch.
  */
 export async function describeImage(imagePath: string): Promise<string> {
+  // Dry-run: return placeholder, no Gemini call
+  if (isDryRun()) {
+    console.error(`[embedder/assets] EMBED_DRY_RUN=true — skipping describeImage for ${imagePath}`);
+    return `[dry-run] Description placeholder for ${imagePath}`;
+  }
+
   const data = await readFile(imagePath);
   const base64 = data.toString("base64");
   const mimeType = getMimeType(imagePath);
@@ -154,8 +185,18 @@ export async function extractPdfPages(
  * Accepts a file path or a raw Buffer.
  */
 export async function embedPdf(pathOrBuffer: string | Buffer): Promise<number[]> {
-  const data = typeof pathOrBuffer === "string" 
-    ? await readFile(pathOrBuffer) 
+  // Gate: kill-switch + telemetry. chars=0 for binary PDF (count-based cost).
+  chargeTick(1, 0, ASSET_EMBED_COST_USD);
+
+  // Dry-run: return zero-vector, no Gemini call
+  if (isDryRun()) {
+    const label = typeof pathOrBuffer === "string" ? pathOrBuffer : "<buffer>";
+    console.error(`[embedder/assets] EMBED_DRY_RUN=true — skipping embedPdf for ${label}`);
+    return dryRunVector();
+  }
+
+  const data = typeof pathOrBuffer === "string"
+    ? await readFile(pathOrBuffer)
     : pathOrBuffer;
   const base64 = data.toString("base64");
 
@@ -217,8 +258,15 @@ export async function splitPdfIntoChunks(
 
 /**
  * Transcribe audio using Gemini generative model.
+ * Note: uses generateContent (not embedContent) — not gated by embed kill-switch.
  */
 export async function transcribeAudio(audioPath: string): Promise<string> {
+  // Dry-run: return placeholder, no Gemini call
+  if (isDryRun()) {
+    console.error(`[embedder/assets] EMBED_DRY_RUN=true — skipping transcribeAudio for ${audioPath}`);
+    return `[dry-run] Transcription placeholder for ${audioPath}`;
+  }
+
   const data = await readFile(audioPath);
   const base64 = data.toString("base64");
   const mimeType = getMimeType(audioPath);
