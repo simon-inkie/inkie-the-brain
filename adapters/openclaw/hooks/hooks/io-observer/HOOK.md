@@ -11,7 +11,7 @@ metadata:
 
 # io-observer
 
-Replaces the "Io Memory Observer" cron with event-driven observation and reflection.
+Replaces the memory-observer cron with event-driven observation and reflection.
 
 On every inbound (`message:preprocessed`) and outbound (`message:sent`) message:
 

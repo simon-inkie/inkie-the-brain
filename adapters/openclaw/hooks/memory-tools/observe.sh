@@ -88,6 +88,10 @@ Output your observations using the XML format specified. Include <observations>,
 
 # Call Claude with the observation prompt
 # Uses claude CLI in print mode with a fast model
+# Signal to SessionStart hooks that this is a one-shot model call, not an
+# interactive session: persona-inject.sh and obs-inject.sh both gate on this
+# flag and emit nothing, so the call stays lean and cannot recurse.
+export BRAIN_ONE_SHOT_SESSION=1
 echo "🔬 Running observation pass..."
 log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
 RESULT=$(echo "$FULL_PROMPT" | claude --print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
@@ -134,11 +138,50 @@ echo "📊 State updated: $NEW_COUNT unprocessed observations ($NEW_CHARS chars)
 # Rebuild current-context.md
 bash "$SCRIPT_DIR/build-context.sh"
 
+# Source ~/io-data/.env so both this script and any spawned child processes
+# inherit EMBED_DRY_RUN, GEMINI_API_KEY, QDRANT_API_KEY etc.
+# `set -a` auto-exports every assignment until `set +a`.
+set -a
+. ~/io-data/.env 2>/dev/null || true
+set +a
+
+# Locate a the-brain checkout that can run the CLI from source. BRAIN_ROOT
+# names it explicitly; otherwise derive it from this script's own location,
+# which holds when running straight from a checkout (the built layout has no
+# cli/index.ts, so auto-index is skipped there).
+resolve_brain_root() {
+    local candidate
+    for candidate in "${BRAIN_ROOT:-}" "$SCRIPT_DIR/../../../.."; do
+        [ -n "$candidate" ] || continue
+        if [ -f "$candidate/cli/index.ts" ]; then
+            (cd "$candidate" && pwd)
+            return 0
+        fi
+    done
+    return 1
+}
+
+BRAIN_CHECKOUT="$(resolve_brain_root || true)"
+
 # Auto-index new observation into Qdrant
-cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null &
+if [ "${EMBED_DRY_RUN:-}" = "true" ]; then
+  echo "[observe.sh] EMBED_DRY_RUN=true — skipping auto-index of $OUTPUT_FILE" >&2
+else
+  echo "[observe.sh] auto-indexing $OUTPUT_FILE" >&2
+  if [ -n "$BRAIN_CHECKOUT" ]; then
+    (cd "$BRAIN_CHECKOUT" && npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null) &
+  fi
+fi
 
 # Cross-link observation to brain files
-cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts cross-link "$OUTPUT_FILE" 2>/dev/null &
+if [ "${EMBED_DRY_RUN:-}" = "true" ]; then
+  echo "[observe.sh] EMBED_DRY_RUN=true — skipping cross-link of $OUTPUT_FILE" >&2
+else
+  echo "[observe.sh] cross-linking $OUTPUT_FILE" >&2
+  if [ -n "$BRAIN_CHECKOUT" ]; then
+    (cd "$BRAIN_CHECKOUT" && npx tsx cli/index.ts cross-link "$OUTPUT_FILE" 2>/dev/null) &
+  fi
+fi
 
 # Check if reflection is due (either count OR character threshold)
 COUNT_THRESHOLD=$(jq -r '.reflectionTriggerThreshold // 5' "$STATE_FILE" 2>/dev/null || echo "5")

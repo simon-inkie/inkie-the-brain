@@ -109,9 +109,11 @@ $COMPRESSION"
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 OUTPUT_FILE="$REF_DIR/$TIMESTAMP.md"
 
+# One-shot model call, not an interactive session (see observe.sh).
+export BRAIN_ONE_SHOT_SESSION=1
 echo "🧠 Running reflection..."
 log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
-RESULT=$(echo "$FULL_PROMPT" | claude --print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
+RESULT=$(echo "$FULL_PROMPT" | claude --print --no-session-persistence --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
 
 if [ -z "$RESULT" ]; then
     log error "claude-call-failed" "{\"reason\":\"empty-result\"}"
@@ -144,8 +146,40 @@ log info "state-reset" "{}"
 # Rebuild current-context.md
 bash "$SCRIPT_DIR/build-context.sh"
 
+# Source ~/io-data/.env so both this script and any spawned child processes
+# inherit EMBED_DRY_RUN, GEMINI_API_KEY, QDRANT_API_KEY etc.
+# `set -a` auto-exports every assignment until `set +a`.
+set -a
+. ~/io-data/.env 2>/dev/null || true
+set +a
+
+# Locate a the-brain checkout that can run the CLI from source. BRAIN_ROOT
+# names it explicitly; otherwise derive it from this script's own location,
+# which holds when running straight from a checkout (the built layout has no
+# cli/index.ts, so auto-index is skipped there).
+resolve_brain_root() {
+    local candidate
+    for candidate in "${BRAIN_ROOT:-}" "$SCRIPT_DIR/../../../.."; do
+        [ -n "$candidate" ] || continue
+        if [ -f "$candidate/cli/index.ts" ]; then
+            (cd "$candidate" && pwd)
+            return 0
+        fi
+    done
+    return 1
+}
+
+BRAIN_CHECKOUT="$(resolve_brain_root || true)"
+
 # Auto-index new reflection into Qdrant
-cd ~/io-projects/the-brain && GEMINI_API_KEY=$(grep GEMINI_API_KEY ~/io-data/.env | cut -d= -f2) npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null &
+if [ "${EMBED_DRY_RUN:-}" = "true" ]; then
+  echo "[reflect.sh] EMBED_DRY_RUN=true — skipping auto-index of $OUTPUT_FILE" >&2
+else
+  echo "[reflect.sh] auto-indexing $OUTPUT_FILE" >&2
+  if [ -n "$BRAIN_CHECKOUT" ]; then
+    (cd "$BRAIN_CHECKOUT" && npx tsx cli/index.ts index --file "$OUTPUT_FILE" 2>/dev/null) &
+  fi
+fi
 
 echo ""
 echo "Review the reflection and merge notable items into MEMORY.md"

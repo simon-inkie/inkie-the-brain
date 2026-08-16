@@ -1,15 +1,22 @@
 /**
  * the-brain — Claude Code Stop hook handler.
  *
- * Fires after each assistant turn. Delegates to observe-trigger with
- * force=false, so the cooldown + three-trigger OR logic from core/observer
- * gates whether observe.sh actually runs.
+ * Session-end-flush strategy: fires AT MOST ONCE per session.
+ *
+ * On each Stop call, we check whether this session has ever been observed.
+ * If not, and there is unobserved content, we fire a single force observation
+ * (label: "session-flush"). On all subsequent Stop calls for the same session,
+ * we no-op — the flush condition is already satisfied.
+ *
+ * This eliminates the per-turn Haiku burst that occurred on agent restart when
+ * many Stop calls fired back-to-back for accumulated turns. Compact + mid-session
+ * observation is handled entirely by on-pre-compact.ts (force=true, always).
  *
  * Fail-open: any error → no observation + exit 0. Never blocks the agent.
  */
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 
 try {
@@ -31,6 +38,11 @@ import {
   type HookInput,
   type TriggerResult,
 } from "./observe-trigger.js";
+import {
+  loadPointer,
+  readTranscriptFromOffset,
+} from "../../../core/observer/index.js";
+import { resolveMemoryDir } from "./memory-root.js";
 
 // Re-exports for tests + back-compat.
 export { sessionKeyFor };
@@ -43,7 +55,45 @@ export async function run(rawInput: string): Promise<TriggerResult> {
   } catch {
     return { fired: false, reason: "malformed stdin" };
   }
-  return runObservation(input, { force: false, label: "obs" });
+
+  // Resolve pointer for this session to check whether we've already observed.
+  const projectDir = input.cwd ?? process.cwd();
+  const memoryDir = resolveMemoryDir(projectDir);
+  const pointersDir = join(memoryDir, "observer-pointers");
+
+  // Guard: need session_id + transcript_path to do anything useful.
+  if (!input.session_id) {
+    return { fired: false, reason: "no session_id in hook payload" };
+  }
+  if (!input.transcript_path) {
+    return { fired: false, reason: "no transcript_path in hook payload" };
+  }
+
+  const sessionKey = sessionKeyFor(projectDir, input.session_id);
+  const pointer = loadPointer(pointersDir, sessionKey);
+
+  // No pointer yet → session just started, nothing accumulated. No-op.
+  if (!pointer) {
+    return { fired: false, reason: "no pointer — session not yet started" };
+  }
+
+  // Already observed this session → no-op. PreCompact handles mid-session.
+  if (pointer.lastObservedTimestamp !== null) {
+    return { fired: false, reason: "already observed this session" };
+  }
+
+  // Check whether there is any unobserved content.
+  const { messages } = readTranscriptFromOffset(
+    input.transcript_path,
+    pointer.lastObservedOffset,
+  );
+
+  if (messages.length === 0) {
+    return { fired: false, reason: "no unobserved content" };
+  }
+
+  // Flush condition met: first observation for this session, content exists.
+  return runObservation(input, { force: true, label: "session-flush" });
 }
 
 interface StopHookOutput {

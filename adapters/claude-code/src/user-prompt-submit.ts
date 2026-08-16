@@ -74,6 +74,14 @@ export async function run(rawInput: string): Promise<string> {
     return "";
   }
 
+  // When obs-inject.sh delivers the observation block via the cached
+  // SessionStart prefix, the per-turn hook emits ONLY the NOW timestamp
+  // (no memory block). The flag governs both sides so the obs is never
+  // doubled (cached + per-turn).
+  if (process.env.BRAIN_OBS_VIA_SESSIONSTART === "1") {
+    return `<the-brain>\n${nowLine()}\n</the-brain>`;
+  }
+
   const projectDir = input.cwd ?? process.cwd();
   const memoryDir = resolveMemoryDir(projectDir);
   const memFile = memoryFilePath(memoryDir);

@@ -60,7 +60,11 @@ describe("on-pre-compact — force-fire semantics", () => {
 
     toolsDir = join(testDir, "tools");
     mkdirSync(toolsDir, { recursive: true });
-    observeLog = join(testDir, "observe.log");
+    // OUTSIDE testDir on purpose. observe.sh is spawned detached and keeps
+    // writing after run() resolves; a log file inside testDir means the child
+    // can recreate an entry under the tree afterEach is deleting, which is an
+    // ENOTEMPTY race no retry budget reliably wins.
+    observeLog = `${testDir}-observe.log`;
     writeFileSync(
       join(toolsDir, "observe.sh"),
       `#!/bin/bash\necho "fired MEMORY_DIR=$MEMORY_DIR file=$2" >> "${observeLog}"\n`,
@@ -70,14 +74,19 @@ describe("on-pre-compact — force-fire semantics", () => {
     process.env.BRAIN_TOOLS_DIR = toolsDir;
     process.env.BRAIN_MEMORY_DIR = memoryDir;
     delete process.env.BRAIN_DEBUG;
+    // Clear AGENT_NAME (and USER_NAME) so the tier-0 persona override does not
+    // hijack memory resolution to a live agent silo. A real shell usually has
+    // AGENT_NAME set, and it resolves ahead of the BRAIN_MEMORY_DIR sandbox
+    // above, silently bypassing this test's fixtures.
     delete process.env.AGENT_NAME;
     delete process.env.USER_NAME;
   });
 
   afterEach(() => {
-    // observe.sh spawns detached and may still be writing files to testDir
-    // when this fires — maxRetries handles the ENOTEMPTY race.
+    // Retries stay as a backstop: the child no longer writes inside testDir
+    // (see observeLog above), but it is still detached and unwaited.
     rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync(observeLog, { force: true });
     process.env = { ...prevEnv };
   });
 
@@ -174,6 +183,9 @@ describe("on-pre-compact — force-fire semantics", () => {
 
     const result = await run(makeInput({ trigger: "manual" }));
     expect(result.fired).toBe(true);
+    // Let the detached observe.sh land before afterEach tears down testDir,
+    // matching the other force-fire cases above (avoids an ENOTEMPTY cleanup race).
+    expect(await waitForObserveLog()).toBe(true);
   });
 
   it("fails soft on malformed stdin", async () => {

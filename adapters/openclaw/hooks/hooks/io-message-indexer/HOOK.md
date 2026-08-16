@@ -11,7 +11,7 @@ metadata:
 
 # io-message-indexer
 
-Replaces the hourly "Io Message Indexer" cron with real-time, event-driven indexing.
+Replaces the hourly message-indexer cron with real-time, event-driven indexing.
 
 On every inbound (`message:preprocessed`) and outbound (`message:sent`) message:
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Event-driven observation + reflection hook. Replaces the "Io Memory Observer" cron job and heartbeat reflection checks with real-time, fire-and-forget processing.
+Event-driven observation + reflection hook. Replaces the memory-observer cron job and heartbeat reflection checks with real-time, fire-and-forget processing.
 
 **Trigger:** `message:preprocessed` (inbound) + `message:sent` (outbound)
 
@@ -243,8 +243,8 @@ export default function handler(event: Record<string, unknown>): void {
 
 ## Cleanup After Deployment
 
-1. **Disable cron:** "Io Memory Observer" (id: `b5f8ca7c-2266-4a42-86a7-8bbef170ec23`)
-2. **Disable cron:** "Io Message Indexer" (id: `46b8096f-8bd1-481c-8801-26071d4c0f03`) — already replaced by `io-message-indexer` hook
+1. **Disable cron:** the memory-observer cron, if you were running one
+2. **Disable cron:** the message-indexer cron — already replaced by the `io-message-indexer` hook
 3. **Update HEARTBEAT.md:** Remove reflection check section entirely
 4. **Test:** Send several messages, verify observation fires after thresholds, verify reflection fires after observation count
 

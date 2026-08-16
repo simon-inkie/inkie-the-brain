@@ -10,8 +10,9 @@
  * Fail-open: any error → no observation + exit 0. Never blocks compaction.
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 try {
@@ -55,6 +56,26 @@ function emit(): never {
   process.exit(0);
 }
 
+/**
+ * Locate a the-brain checkout that can run `cli/index.ts`, or null.
+ * BRAIN_ROOT wins; otherwise walk up from this module looking for the CLI.
+ */
+function resolveBrainRoot(): string | null {
+  const candidates: string[] = [];
+  if (process.env.BRAIN_ROOT) candidates.push(process.env.BRAIN_ROOT);
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // checkout: adapters/claude-code/src/ -> three levels up
+    candidates.push(resolve(here, "..", "..", ".."));
+  } catch {
+    /* no module URL (bundled in an odd way) — fall through */
+  }
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, "cli", "index.ts"))) return candidate;
+  }
+  return null;
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -85,11 +106,20 @@ async function main(): Promise<void> {
     }
   }
 
-  // Index current agent's CC conversations in background before context is lost
+  // Index the current agent's conversations in the background before context is
+  // lost. This runs the-brain's own CLI from source (via tsx), so it needs the
+  // checkout rather than the installed adapter. BRAIN_ROOT names it explicitly;
+  // otherwise derive it from this module's own location, which holds when the
+  // adapter is run straight from a checkout. If neither yields a tree with
+  // cli/index.ts, skip: background indexing is best-effort and must never block
+  // compaction.
   const agentName = process.env.AGENT_NAME;
   if (agentName) {
     try {
-      const brainRoot = resolve(homedir(), "io-projects", "the-brain");
+      const brainRoot = resolveBrainRoot();
+      if (!brainRoot) {
+        emit();
+      }
       const child = spawn(
         "node",
         ["--import", "tsx/esm", "cli/index.ts", "index-messages", "--agent", agentName],

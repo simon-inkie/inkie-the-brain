@@ -24,7 +24,7 @@ import { log } from "../../../core/log.js";
  *
  * Tier 5 auto-silos by project-dir basename so every CC session gets its
  * own memory dir keyed off the repo name — never mixing with another
- * project or with the OpenClaw main-Io workspace.
+ * project or with the OpenClaw main-agent workspace.
  *
  * The returned path is absolute but is NOT required to exist — callers
  * that need to write should `mkdirSync(..., { recursive: true })` first.

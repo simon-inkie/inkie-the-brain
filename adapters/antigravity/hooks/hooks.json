@@ -1,0 +1,16 @@
+{
+  "the-brain": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "__THE_BRAIN_ROOT__/adapters/antigravity/bin/pre-invocation.sh"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "__THE_BRAIN_ROOT__/adapters/antigravity/bin/on-stop.sh"
+      }
+    ]
+  }
+}

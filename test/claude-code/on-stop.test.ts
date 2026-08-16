@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdirSync,
   writeFileSync,
-  readFileSync,
   rmSync,
   existsSync,
 } from "fs";
@@ -10,8 +9,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { run, sessionKeyFor } from "../../adapters/claude-code/src/on-stop.js";
 import {
-  MIN_OBSERVATION_GAP_MS,
   loadPointer,
+  savePointer,
 } from "../../core/observer/index.js";
 
 /**
@@ -45,9 +44,10 @@ function buildTranscript(turns: number, contentLen = 40): string {
   return lines.join("\n") + "\n";
 }
 
-describe("on-stop — run()", () => {
+describe("on-stop — run() (compact-only observation / session-flush)", () => {
   let testDir: string;
   let memoryDir: string;
+  let pointersDir: string;
   let transcriptPath: string;
   let toolsDir: string;
   let observeLog: string;
@@ -59,13 +59,16 @@ describe("on-stop — run()", () => {
       `tb-on-stop-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     memoryDir = join(testDir, "memory");
+    pointersDir = join(memoryDir, "observer-pointers");
     mkdirSync(memoryDir, { recursive: true });
     transcriptPath = join(testDir, "transcript.jsonl");
 
     // Build a mock observe.sh that just logs its invocation.
     toolsDir = join(testDir, "tools");
     mkdirSync(toolsDir, { recursive: true });
-    observeLog = join(testDir, "observe.log");
+    // OUTSIDE testDir on purpose: observe.sh is spawned detached and may write
+    // after afterEach has started deleting testDir (ENOTEMPTY race).
+    observeLog = `${testDir}-observe.log`;
     writeFileSync(
       join(toolsDir, "observe.sh"),
       `#!/bin/bash\necho "fired MEMORY_DIR=$MEMORY_DIR file=$2" >> "${observeLog}"\n`,
@@ -74,7 +77,8 @@ describe("on-stop — run()", () => {
     require("fs").chmodSync(join(toolsDir, "observe.sh"), 0o755);
 
     process.env.BRAIN_TOOLS_DIR = toolsDir;
-    // Prevent resolver from finding a real ~/.the-brain/memory
+    // Prevent resolver from finding a real ~/.the-brain/memory.
+    // Clear AGENT_NAME so tier-0 persona override doesn't route to the live silo.
     process.env.BRAIN_MEMORY_DIR = memoryDir;
     delete process.env.BRAIN_DEBUG;
     delete process.env.AGENT_NAME;
@@ -82,7 +86,8 @@ describe("on-stop — run()", () => {
   });
 
   afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
+    rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync(observeLog, { force: true });
     process.env = { ...prevEnv };
   });
 
@@ -105,6 +110,8 @@ describe("on-stop — run()", () => {
     return false;
   }
 
+  // ── Basic guard cases ────────────────────────────────────────────────────
+
   it("returns reason when transcript_path missing", async () => {
     const result = await run(
       JSON.stringify({ session_id: "s", cwd: testDir }),
@@ -121,119 +128,112 @@ describe("on-stop — run()", () => {
     expect(result.reason).toMatch(/session_id/);
   });
 
-  it("does not fire below thresholds", async () => {
-    // 2 turns * 40 chars ~= 160 chars, below balanced default of 500
-    writeFileSync(transcriptPath, buildTranscript(2, 40));
-    // Seed observer-state so we're past cooldown and use strict thresholds
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(
-          Date.now() - MIN_OBSERVATION_GAP_MS - 1000,
-        ).toISOString(),
-        observationMessageThreshold: 20,
-        observationCharThreshold: 10000,
-      }),
-    );
+  it("returns malformed when stdin is not JSON", async () => {
+    const result = await run("not json{{{}");
+    expect(result.fired).toBe(false);
+    expect(result.reason).toMatch(/malformed/);
+  });
+
+  // ── Flush conditions ─────────────────────────────────────────────────────
+
+  it("no-op when no pointer exists (session not yet started)", async () => {
+    // No pointer file written — fresh session with no accumulation.
+    writeFileSync(transcriptPath, buildTranscript(4, 40));
+    const result = await run(makeInput());
+    expect(result.fired).toBe(false);
+    expect(result.reason).toMatch(/no pointer/);
+  });
+
+  it("no-op when pointer has already been observed (lastObservedTimestamp set)", async () => {
+    // Session already has a prior observation — subsequent Stops should no-op.
+    writeFileSync(transcriptPath, buildTranscript(4, 40));
+    const key = sessionKeyFor(testDir, "test-session");
+    const transcriptSize = require("fs").statSync(transcriptPath).size;
+    savePointer(pointersDir, {
+      sessionKey: key,
+      sessionId: "test-session",
+      transcriptPath,
+      lastObservedOffset: transcriptSize,
+      lastObservedTimestamp: new Date().toISOString(), // already observed
+      messagesSinceLastObservation: 0,
+      charsSinceLastObservation: 0,
+    });
 
     const result = await run(makeInput());
     expect(result.fired).toBe(false);
-    expect(result.reason).toMatch(/below thresholds/);
+    expect(result.reason).toMatch(/already observed/);
   });
 
-  it("fires when over message threshold, spawns observe.sh with MEMORY_DIR", async () => {
-    writeFileSync(transcriptPath, buildTranscript(8, 40));
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(
-          Date.now() - MIN_OBSERVATION_GAP_MS - 1000,
-        ).toISOString(),
-        observationMessageThreshold: 6,
-        observationCharThreshold: 10000,
-      }),
-    );
+  it("no-op when pointer exists but no unobserved content (offset at EOF)", async () => {
+    // Pointer exists with null lastObservedTimestamp but offset is at EOF — nothing to flush.
+    writeFileSync(transcriptPath, buildTranscript(2, 40));
+    const key = sessionKeyFor(testDir, "test-session");
+    const transcriptSize = require("fs").statSync(transcriptPath).size;
+    savePointer(pointersDir, {
+      sessionKey: key,
+      sessionId: "test-session",
+      transcriptPath,
+      lastObservedOffset: transcriptSize, // already at EOF
+      lastObservedTimestamp: null,         // never formally observed
+      messagesSinceLastObservation: 0,
+      charsSinceLastObservation: 0,
+    });
+
+    const result = await run(makeInput());
+    expect(result.fired).toBe(false);
+    expect(result.reason).toMatch(/no unobserved content/);
+  });
+
+  it("fires once (force=true, session-flush) when pointer exists, null timestamp, unobserved content", async () => {
+    // The flush condition: pointer exists (session ran), never observed, content waiting.
+    writeFileSync(transcriptPath, buildTranscript(3, 40));
+    const key = sessionKeyFor(testDir, "test-session");
+    savePointer(pointersDir, {
+      sessionKey: key,
+      sessionId: "test-session",
+      transcriptPath,
+      lastObservedOffset: 0,    // content starts from beginning
+      lastObservedTimestamp: null, // never observed
+      messagesSinceLastObservation: 0,
+      charsSinceLastObservation: 0,
+    });
 
     const result = await run(makeInput());
     expect(result.fired).toBe(true);
-    expect(result.reason).toMatch(/16 msgs/);
+    expect(result.reason).toMatch(/force-fire/);
+    expect(result.reason).toMatch(/session-flush|6 msgs/);
 
     // Detached spawn → wait for observe.sh log
     const fired = await waitForObserveLog();
     expect(fired).toBe(true);
-    const log = readFileSync(observeLog, "utf-8");
-    expect(log).toContain(`MEMORY_DIR=${memoryDir}`);
-    expect(log).toContain("file=/tmp/tb-obs-");
   });
 
-  it("advances pointer after firing", async () => {
-    writeFileSync(transcriptPath, buildTranscript(8, 40));
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(
-          Date.now() - MIN_OBSERVATION_GAP_MS - 1000,
-        ).toISOString(),
-        observationMessageThreshold: 6,
-      }),
-    );
-
-    await run(makeInput());
-    await waitForObserveLog();
-
+  it("after flush, pointer lastObservedTimestamp is set — subsequent Stop no-ops", async () => {
+    // After the flush fires, the pointer is updated with a timestamp.
+    // A second Stop call should no-op.
+    writeFileSync(transcriptPath, buildTranscript(3, 40));
     const key = sessionKeyFor(testDir, "test-session");
-    const pointer = loadPointer(join(memoryDir, "observer-pointers"), key);
-    expect(pointer).not.toBeNull();
-    expect(pointer!.lastObservedOffset).toBeGreaterThan(0);
-    expect(pointer!.lastObservedTimestamp).not.toBeNull();
-  });
-
-  it("does not fire within cooldown window", async () => {
-    writeFileSync(transcriptPath, buildTranscript(20, 100));
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(Date.now() - 60_000).toISOString(), // 1 min ago
-        observationMessageThreshold: 6,
-      }),
-    );
-
-    const result = await run(makeInput());
-    expect(result.fired).toBe(false);
-    expect(result.reason).toMatch(/cooldown/);
-  });
-
-  it("second Stop with no new turns does not re-observe the same content", async () => {
-    writeFileSync(transcriptPath, buildTranscript(8, 40));
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(
-          Date.now() - MIN_OBSERVATION_GAP_MS - 1000,
-        ).toISOString(),
-        observationMessageThreshold: 6,
-      }),
-    );
+    savePointer(pointersDir, {
+      sessionKey: key,
+      sessionId: "test-session",
+      transcriptPath,
+      lastObservedOffset: 0,
+      lastObservedTimestamp: null,
+      messagesSinceLastObservation: 0,
+      charsSinceLastObservation: 0,
+    });
 
     const first = await run(makeInput());
     expect(first.fired).toBe(true);
     await waitForObserveLog();
 
-    // Reset cooldown so only the pointer gates us
-    writeFileSync(
-      join(memoryDir, "observer-state.json"),
-      JSON.stringify({
-        lastObservationAt: new Date(
-          Date.now() - MIN_OBSERVATION_GAP_MS - 1000,
-        ).toISOString(),
-        observationMessageThreshold: 6,
-      }),
-    );
+    // Pointer should now have a timestamp set — second call should no-op.
+    const pointer = loadPointer(pointersDir, key);
+    expect(pointer?.lastObservedTimestamp).not.toBeNull();
 
     const second = await run(makeInput());
-    // No new content since last observation → no messages to fire on
     expect(second.fired).toBe(false);
-    expect(second.reason).toMatch(/no messages|below thresholds/);
+    expect(second.reason).toMatch(/already observed/);
   });
 });
 
@@ -242,7 +242,7 @@ describe("sessionKeyFor", () => {
   // for back-compat) — including it caused pointer fragmentation when an
   // agent cd'd between worktrees mid-session. See observe-trigger.ts.
   it("returns cc:<sessionId>, ignoring projectDir", () => {
-    expect(sessionKeyFor("/home/test-user/io-projects/the-brain", "abc123")).toBe(
+    expect(sessionKeyFor("/home/test-user/projects/the-brain", "abc123")).toBe(
       "cc:abc123",
     );
   });

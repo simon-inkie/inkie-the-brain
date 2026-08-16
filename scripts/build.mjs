@@ -29,6 +29,7 @@ import {
 } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { checkCores, CORE_CAP } from "./core-guard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -272,6 +273,26 @@ writeFileSync(
   JSON.stringify(ccPkg, null, 2) + "\n",
 );
 log(`wrote ${ccDist}/package.json`);
+
+// ===========================================================================
+// CORE GUARD
+// ===========================================================================
+// After the build, verify every ~/agents/<name>/CORE.md still assembles (CORE
+// + the static persona-inject wrapper) under the hook's byte cap. A fat CORE
+// would silently truncate in a live session; fail the build here instead.
+const coreViolations = checkCores();
+if (coreViolations.length > 0) {
+  for (const v of coreViolations) {
+    console.error(
+      `[build] CORE GUARD FAIL: ~/agents/${v.agent}/CORE.md assembled ${v.bytes} bytes > ${CORE_CAP} byte cap (would truncate in-session)`,
+    );
+  }
+  console.error(
+    `[build] CORE guard failed: ${coreViolations.length} oversized CORE file(s). Trim the CORE(s) above the cap, then rebuild.`,
+  );
+  process.exit(1);
+}
+log(`CORE guard passed (all CORE.md under ${CORE_CAP} bytes assembled)`);
 
 log("build complete");
 log(`  install plugin:       openclaw plugins install ${pluginDist}`);

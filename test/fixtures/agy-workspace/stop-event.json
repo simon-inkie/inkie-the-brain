@@ -1,0 +1,7 @@
+{
+  "transcriptPath": "__TRANSCRIPT__",
+  "conversationId": "fixture-conv-1",
+  "workspacePaths": ["__WORKSPACE__"],
+  "terminationReason": "USER_COMPLETED",
+  "fullyIdle": true
+}
