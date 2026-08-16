@@ -14,10 +14,15 @@ export interface DiscoveredSession {
 /**
  * Discover Claude Code session JSONL files for indexing.
  *
+ * Attribution is derived from the session itself. There is deliberately no
+ * name table here: a hardcoded directory-to-agent map has to be edited every
+ * time an agent is added or a project moves, and it silently stops indexing
+ * whatever it has not been told about. Convention beats configuration.
+ *
  * Per-session agent attribution falls through this chain:
  *   1. Read the JSONL's first line for `cwd`. If found, take the *basename*
- *      of that path — for a session that ran in `~/agents/aldus/`, that's
- *      `aldus`. For `~/git-repos/inkie-worker/`, that's `inkie-worker`.
+ *      of that path — for a session that ran in `~/agents/researcher/`, that's
+ *      `researcher`. For `~/git-repos/web-api/`, that's `web-api`.
  *      One agent per working directory: simple, conventional, no config.
  *   2. Fall back to the indexer's own `process.env.AGENT_NAME`.
  *   3. Fall back to the literal string `"default"`.
@@ -28,6 +33,11 @@ export interface DiscoveredSession {
  *
  * Subagent files are skipped — parent sessions reference them in their
  * summaries; indexing both would double-count.
+ *
+ * `skippedDirs` and `unmappedDirs` are part of the return shape because the
+ * indexer logs them, but nothing is skipped or left unmapped under this
+ * attribution scheme, so both are always empty. They are the extension point
+ * for a future filter, not dead weight to be pruned.
  */
 export async function discoverCCSessions(): Promise<{
   sessions: DiscoveredSession[];
