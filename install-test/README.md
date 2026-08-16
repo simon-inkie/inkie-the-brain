@@ -17,7 +17,7 @@ This is what verifies "does it actually work for strangers" before each release.
 
 - ❌ Real Claude Code session — CC isn't installable in a stripped container
 - ❌ Real semantic-recall data — the brain ships with no real silo content; only fixture-data verification
-- ❌ Multi-agent coordination — single-agent v0 only
+- ❌ Multi-agent behaviour: the harness runs one silo (`AGENT_NAME=install-test`); per-directory attribution and cross-silo scoping are covered by the vitest suites, not here
 - ❌ Hook firing in production — requires real CC; manual workshop dry-run is the test
 - ❌ Performance / scale — no load testing in v0
 - ❌ macOS/Windows-specific paths — Docker is Linux-only by default; OS-specific issues caught only by GitHub Actions matrix runs on macOS runners (see `.github/workflows/install-test.yml`)

@@ -170,7 +170,7 @@ async function runIndexMessages() {
 async function runContext() {
   const timestamp = args[1];
   if (!timestamp) {
-    console.error("Usage: tsx src/cli.ts context <timestamp>");
+    console.error("Usage: tsx cli/index.ts context <timestamp>");
     console.error("  timestamp: ISO string or epoch ms");
     process.exit(1);
   }

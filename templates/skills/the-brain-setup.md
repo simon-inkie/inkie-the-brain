@@ -73,8 +73,9 @@ Silent checks — only surface if one fails:
 
 1. `~/.the-brain/agents/<name>/memory/OBSERVATION-PROMPT.md` exists
 2. `~/.the-brain/agents/<name>/memory/live-state.json` exists and is valid JSON
-3. `~/.the-brain/agents/<name>/MEMORY.md` exists and contains the anchor comments
-4. `<target>/.the-brain/memory_root` exists and its first line resolves to step-1's dir
+3. `~/.the-brain/agents/<name>/memory/prompts/` contains the five era-compression prompts (`compress-era-level-0..3.md` and `compress-era-cap.md`)
+4. `~/.the-brain/agents/<name>/MEMORY.md` exists and contains the anchor comments
+5. `<target>/.the-brain/memory_root` exists and its first line resolves to step-1's dir
 
 ## Tell the user what happens next
 
@@ -82,7 +83,7 @@ Write this back to the user (adapt names to what they chose):
 
 > Done. Memory for `<name>` now lives at `~/.the-brain/agents/<name>/memory/`.
 >
-> **To activate**: close this Claude Code session and open a fresh one in `<target>`. On first prompt, the UserPromptSubmit hook will inject an (initially empty) `<the-brain>` live block. After a few turns, Stop will fire `observe.sh` and the first observation will land at `memory/observations/`.
+> **To activate**: close this Claude Code session and open a fresh one in `<target>`. On first prompt, the UserPromptSubmit hook will inject an (initially empty) `<the-brain>` live block. At the end of the first turn with real content, the Stop hook fires its once-per-session flush and the first observation lands at `memory/observations/`. After that, Stop no-ops for the rest of the session and observation is driven by compaction: `/compact` (or an automatic compaction) always captures.
 >
 > Memory will persist across `/compact`, sessions, and even renaming/moving the worktree (the pointer file travels with it).
 

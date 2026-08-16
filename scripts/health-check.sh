@@ -14,6 +14,12 @@ HOME_DIR="$HOME"
 QDRANT_CONTAINER="${QDRANT_CONTAINER:-qdrant}"
 WATCHER_UNIT="${WATCHER_UNIT:-the-brain-watcher.service}"
 
+# QDRANT_URL is resolved AFTER the env file is loaded below, because a Qdrant
+# Cloud install keeps its URL in the env file rather than in the shell. Default
+# matches core/config.ts. Without this the check silently reports on whatever
+# happens to be on localhost:6333, which for a Cloud install is either nothing
+# or, worse, some unrelated instance.
+
 # Load env vars. Candidates in precedence order: $BRAIN_ENV_FILE,
 # ~/.the-brain/.env (the documented location), ~/io-data/.env (legacy, kept for
 # installs that predate the ~/.the-brain/ layout). First one present wins.
@@ -29,6 +35,8 @@ for env_file in "${BRAIN_ENV_FILE:-}" "$HOME_DIR/.the-brain/.env" "$HOME_DIR/io-
   fi
 done
 
+QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
+
 PASS="✅"
 FAIL="❌"
 WARN="⚠️"
@@ -39,7 +47,8 @@ echo ""
 
 # --- 1. Qdrant ---
 echo "## Qdrant"
-qdrant_health=$(curl -s --max-time 3 "http://localhost:6333/healthz" 2>/dev/null)
+qdrant_health=$(curl -s --max-time 3 "$QDRANT_URL/healthz" \
+  -H "api-key: ${QDRANT_API_KEY:-}" 2>/dev/null)
 if [[ "$qdrant_health" == *"passed"* ]]; then
   echo "  $PASS Qdrant healthy"
 else
@@ -63,7 +72,7 @@ echo ""
 # --- 2. Collections ---
 echo "## Collections"
 for coll in brain-vault io-observations io-reflections io-messages io-assets; do
-  info=$(curl -s --max-time 3 "http://localhost:6333/collections/$coll" \
+  info=$(curl -s --max-time 3 "$QDRANT_URL/collections/$coll" \
     -H "api-key: ${QDRANT_API_KEY:-}" 2>/dev/null)
   count=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('points_count',0))" 2>/dev/null)
   status=$(echo "$info" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('status','?'))" 2>/dev/null)

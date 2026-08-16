@@ -36,8 +36,14 @@ export AGENT_NAME="install-test"
 run_step "pnpm index (fixture corpus)" timeout 90 pnpm index || exit $?
 
 # Search for a phrase that's distinctively in one of the fixtures.
-echo "  pnpm search 'octopus distributed cognition'"
-SEARCH_OUT=$(timeout 30 pnpm --silent search "octopus distributed cognition" 2>&1 | head -50)
+#
+# `pnpm run search`, NOT `pnpm search`: pnpm has a BUILT-IN `search` command
+# that queries the npm registry, and a built-in beats a package.json script of
+# the same name. `pnpm search "octopus …"` therefore returns npm packages and
+# this check fails with output that looks nothing like the brain. `run` forces
+# the script. Same trap is called out in README/QUICKSTART.
+echo "  pnpm run search 'octopus distributed cognition'"
+SEARCH_OUT=$(timeout 30 pnpm --silent run search "octopus distributed cognition" 2>&1 | head -50)
 
 # The expected fixture must show up in the results.
 if echo "$SEARCH_OUT" | grep -q "octopus-architecture"; then
@@ -51,6 +57,6 @@ fi
 
 # Negative-control: a query unrelated to fixtures should NOT return high-confidence
 # matches to fixture filenames. We don't enforce this strictly — just log it.
-echo "  pnpm search 'completely unrelated quantum nonsense' (negative control)"
-NEG_OUT=$(timeout 30 pnpm --silent search "completely unrelated quantum nonsense" 2>&1 | head -10)
+echo "  pnpm run search 'completely unrelated quantum nonsense' (negative control)"
+NEG_OUT=$(timeout 30 pnpm --silent run search "completely unrelated quantum nonsense" 2>&1 | head -10)
 echo "$NEG_OUT" | head -3 | sed 's|^|    |'

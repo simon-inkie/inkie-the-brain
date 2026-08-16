@@ -1,349 +1,268 @@
-# The Brain — Architecture & Claude Code Integration
+# the-brain: architecture
 
-**Goal:** memory that survives compaction. The brain wires Claude Code's hook system to a structured observation pipeline so an agent's lived context (decisions, in-flight tasks, accumulated facts) persists across sessions and surfaces back via semantic recall when the next session opens.
+**Goal:** memory that survives compaction. The brain wires an agent runtime's hook system to a structured observation pipeline, so an agent's lived context (decisions, in-flight tasks, accumulated facts) persists across sessions and comes back through semantic recall when the next session opens.
 
-This document explains the design intuition and the hook architecture. For install steps, see `QUICKSTART.md`. For the API surface, see `README.md`.
-
----
-
-## 1. The framing shift
-
-The Brain in OpenClaw is a **context engine** — it slices the conversation array down to a bounded window and injects a memory block each turn. Its reason for existing is to fight OpenClaw's unbounded `contents` growth.
-
-The Brain in Claude Code is a **memory system** — it exposes curated, compaction-proof long-term memory to the model via hook-level context injection. Claude Code handles context bounding natively via its own compaction. The Brain's value moves up the stack: **memory that survives compaction.**
-
-This is the same codebase with the same observer pipeline, just reframed for what Claude Code actually needs.
-
-### Why it matters
-
-Claude Code compaction is destructive to session-local detail. Even with Opus 4.7 and 1M context, compaction fires eventually and summarises away:
-- Why you went a particular direction
-- Hard-won debugging state
-- Spec decisions made mid-session
-- The shape of rejected alternatives
-
-The Brain's memory lives on disk (`memory/observations/`, `memory/reflections/`, `MEMORY.md`). After compaction, the next turn re-injects the live memory block. Continuity is restored, even though the session itself got summarised.
+This document describes the system as it stands. For install steps, see [`QUICKSTART.md`](../QUICKSTART.md). For the configuration surface, see [`README.md`](../README.md).
 
 ---
 
-## 2. What ports, what doesn't
+## 1. The framing
 
-| Component | Fate | Mechanism |
-|---|---|---|
-| Message slicing (`sliceRecent`, `recentTurnCount`) | ❌ drop | Claude Code hooks cannot modify conversation history. Compaction is Claude Code's job. |
-| Memory block injection (`readInjectedMemoryBlock`, `buildContext`) | ✅ port | `UserPromptSubmit` hook → emit `additionalContext` JSON |
-| Observer pipeline (transcript-pointer, 3-trigger + cooldown) | ✅ port | `Stop` hook fires evaluator, same trigger logic |
-| Pre-compaction capture | ✅ **new capability** | `PreCompact` hook → force observation sweep before destruction |
-| Reflection + era-compression (shell scripts) | ✅ port as-is | `observe.sh`, `reflect.sh`, `build-context.sh`, `compress-era.sh` triggered by Node handlers |
-| MCP server (semantic search) | ✅ wire up | Already standalone at `mcp/server.ts`; register in Claude Code MCP config |
-| Multi-session coordination | ✅ natural fit | `cwd` in every hook payload → per-project (per-agent) memory namespacing |
+Compaction is destructive to session-local detail. However large the context window, compaction fires eventually, and it summarises away exactly the things that are expensive to rediscover: why you went a particular direction, hard-won debugging state, decisions made mid-session, the shape of rejected alternatives.
+
+The brain's answer is not a bigger window. It is to write the valuable parts to disk *before* the loss, and to re-inject them afterwards. Memory lives in markdown files under an agent silo, gets embedded into a vector store, and comes back two ways: as an injected block at the top of the next turn, and as a `remembering` tool the agent can query on demand.
+
+Two consequences fall out of that, and they shape everything below:
+
+- **Capture has to be tied to the moment of loss, not to a clock.** Hence the `PreCompact` hook, and hence observation being compaction-driven rather than per-turn.
+- **The memory block has to be bounded.** An unbounded block eventually costs more than the compaction it was protecting you from. Hence the three-zone assembly with per-zone budgets, and the byte-capped era summary.
 
 ---
 
-## 3. Architecture
+## 2. The loop
 
 ```
 [user submits prompt]
         │
         ▼
-   UserPromptSubmit hook ─── reads MEMORY.md live block (three-zone)
-        │                     emits additionalContext: <memory> + <user prompt>
+  UserPromptSubmit hook ──── reads the live block from MEMORY.md
+        │                    emits additionalContext: <the-brain> block
         ▼
-   [Claude Code processes turn]
-        │
-        ▼
-   Stop hook (per turn)
+  [runtime processes the turn]
         │
         ▼
-   evaluateShouldObserve() ── checks 3 triggers + 25min cooldown
+  Stop hook ── first Stop of this session, with unobserved content?
+        │        yes → forced "session-flush" observation
+        │        no  → no-op (every later Stop in the session is a no-op)
+        ▼
+  observe.sh (LLM pass) ──→ memory/observations/<timestamp>.md
+        │                   ├─ may chain into reflect.sh on threshold cross
+        │                   └─ build-context.sh regenerates the live block
         │
-        ├─ fires → observe.sh (LLM pass) → memory/observations/*.md
-        │         + reflection trigger check
-        │         + build-context.sh (regenerates MEMORY.md live block)
-        │
-        └─ skips → exits silently
-
-                                   [Claude Code compacts]
-                                          │
-                                          ▼
-                                   PreCompact hook
-                                          │
-                                          ▼
-                                   FORCE observation sweep
-                                   (bypass cooldown — compaction is about
-                                    to destroy context, capture now)
-
-[next turn] → UserPromptSubmit again → re-injects fresh MEMORY.md → continuity restored
+        │            [runtime compacts, automatically or via /compact]
+        │                          │
+        │                          ▼
+        │                   PreCompact hook
+        │                          │
+        │                          ▼
+        │                   FORCED observation sweep
+        │                   (ignores cooldown: compaction is about to
+        │                    destroy this context, so capture it now)
+        ▼
+[next turn] → UserPromptSubmit again → re-injects the refreshed block
 ```
 
-### Three hooks
+Separately and asynchronously, the daemon watches the vault and the silos, and re-indexes changed files into Qdrant so `remembering` and `pnpm run search` stay current.
+
+### Trigger logic
+
+`core/observer/evaluator.ts` is a pure function. It fires when **any** of these is true:
+
+- unobserved message count reaches the threshold (default 6)
+- unobserved character count reaches the threshold (default 500)
+- the oldest unobserved message reaches the age limit (default 4 hours)
+
+and it refuses to fire, short-circuiting, when an observation is already in flight, when the gap since the last observation is under the cooldown (default 25 minutes), or when there are no messages at all.
+
+`PreCompact` bypasses all of it by passing `force`. `Stop` also passes `force`, but guards itself upstream: it fires only when the session has no recorded observation yet and there is unobserved content, which makes it a once-per-session flush rather than a per-turn trigger.
+
+The earlier design fired on the evaluator at every `Stop`. It produced a burst of LLM calls whenever an agent restarted with many turns queued up, and the cooldown was the only thing standing between that and a much larger bill. Moving the real work to `PreCompact` removed the burst and, as a side effect, made the memory block stable between compactions. That stability is what makes the optional `SessionStart` cache-split in §5 worth having.
+
+---
+
+## 3. The memory block: three zones, bounded
+
+`adapters/openclaw/hooks/memory-tools/build-context.sh` assembles the live block and splices it into `MEMORY.md` between `<!-- IO_LIVE_START -->` and `<!-- IO_LIVE_END -->` markers. Everything outside those markers belongs to other writers and is preserved byte for byte. The splice is atomic against concurrent invocations of itself, via a `flock` on `memory/.live-block.lock`. That is a permanent runtime contract, not a development convenience.
+
+Three zones, oldest to newest, top to bottom:
+
+1. **Era summary**: a fused narrative of reflections that have aged out of the hot zone. Stored at `memory/era-summary.md`, regenerated by `compress-era.sh`.
+2. **Recent reflections**: the last K reflections.
+3. **Unprocessed observations**: bullets from observation files newer than the most recent reflection.
+
+The script has three modes:
+
+| Mode | Behaviour |
+|---|---|
+| default | Assemble and splice into `MEMORY.md`, rebuild the era if due, write live-state. |
+| `--emit` | Pure read. Print the assembled block to stdout, no splice, no era rebuild, no state write. Used by the Antigravity adapter, whose `PreInvocation` hook fires once per model call and so must not mutate anything. |
+| `--cached` | `--emit` plus two changes for the cached `SessionStart` prefix: no wall-clock stamp (the per-turn hook owns "now"), and zone 2 rendered as budget-capped gists rather than verbatim bodies. Targets under 9,500 characters. |
+
+Budget priority in `--cached` mode runs era summary (full), then unprocessed observations (full), then reflection gists with whatever is left. Full reflection bodies stay on disk and remain reachable through semantic recall, so capping the gist does not lose anything, it only moves it from push to pull.
+
+On the reading side, `core/context-engine/memory-reader.ts` extracts the text between the two markers and hands it to whichever adapter asked. `core/context-engine/engine.ts` is a different thing and is **OpenClaw-only**: it implements OpenClaw's `ContextEngine` contract and bounds per-turn history by slicing the message array. That is exactly the job Claude Code and Antigravity do for themselves through their own compaction, which is why the Claude Code adapter uses the reader and never touches the engine. If you are reading this repository and wondering why a memory system contains message-slicing code, that is the answer.
+
+### Era compression and the byte cap
+
+Reflections age into the era summary through `compress-era.sh`, which runs the fusion at escalating levels under budget pressure. The result is capped at `ERA_SUMMARY_MAX_BYTES` (default 12,000). If a fusion pass produces something larger, the output is fed back through `templates/prompts/compress-era-cap.md` for up to `ERA_SUMMARY_CAP_PASSES` passes (default 3), keeping the best result seen. If the cap prompt file is missing, the loop is skipped with a warning and the run continues: fail-open, because a slightly oversized era summary is a much smaller problem than a failed memory write.
+
+---
+
+## 4. Where memory lives on disk
+
+```
+~/.the-brain/
+├── .env                      env file, the documented location (see §7)
+├── agents/
+│   └── <name>/
+│       ├── MEMORY.md         live block spliced between the IO_LIVE markers
+│       ├── references/       hand-written durable captures (indexed)
+│       └── memory/
+│           ├── observations/     one markdown file per observation pass
+│           ├── reflections/      folded observations
+│           ├── observer-pointers/ per-session transcript byte offsets
+│           ├── observer-state.json
+│           ├── era-summary.md
+│           ├── prompts/          per-agent era-compression prompt set
+│           └── OBSERVATION-PROMPT.md
+├── state/                    indexer state (override with BRAIN_STATE_DIR)
+└── logs/
+    ├── hook-activity.jsonl   structured log, every component writes here
+    └── embed-spend-ledger.json
+
+~/brain/                      the knowledge vault (override with BRAIN_VAULT_DIR)
+├── ideas/  decisions/  work/  projects/  learnings/
+└── assets/                   images, PDFs, audio
+```
+
+`pnpm agent init <name>` creates a silo with the full seed kit and, with `--link <dir>`, writes the pointer file that binds a working directory to it.
+
+### Which silo a session writes to
+
+`adapters/claude-code/src/memory-root.ts` resolves the memory directory per session, first match winning:
+
+| Tier | Source | Result |
+|---|---|---|
+| 0 | `AGENT_NAME` env var | `~/.the-brain/agents/$AGENT_NAME/memory/` |
+| 1 | `<project>/memory/` exists | that directory |
+| 2 | `<project>/.the-brain/memory_root` | the path that file contains |
+| 3 | `BRAIN_MEMORY_DIR` env var | that path |
+| 4 | `~/.the-brain/memory/` exists | that directory |
+| 5 | fallback | `~/.the-brain/agents/<basename of project dir>/memory/` |
+
+Tier 0 exists so a named persona can operate inside a repository whose tier-2 pointer routes somewhere else, without disturbing that repository's default. Tier 5 means a zero-configuration install still gets per-project namespacing: a session in `~/code/web-api/` writes to the `web-api` silo. It is logged at `warn` level precisely because "I expected my silo and got an auto-named one" is the failure people hit, and it should be greppable.
+
+Parallel sessions in the same project share a memory directory by design, and coordinate through the `observationInFlight` lock in `observer-state.json`.
+
+---
+
+## 5. Adapters
+
+`core/` is platform-agnostic. Each adapter binds one runtime's events to it and handles only that runtime's transcript-path derivation and payload shape.
+
+**Invariant: `core/` MUST NOT import from `adapters/`.**
+
+### Claude Code (`adapters/claude-code/`)
 
 | Hook | Matcher | Purpose |
 |---|---|---|
-| `UserPromptSubmit` | - | Inject MEMORY.md live block as `additionalContext` |
-| `Stop` | - | Trigger observation sweep (respects cooldown) |
-| `PreCompact` | `"auto"`, `"manual"` | Force observation sweep (bypasses cooldown) |
+| `UserPromptSubmit` | none | Inject the live block as `additionalContext` |
+| `Stop` | none | Once-per-session flush observation |
+| `PreCompact` | `auto`, `manual` | Forced observation sweep |
 
-### MCP server
+Bundled by `pnpm build` into `dist/claude-code/`, with `bin/*.sh` entry points, the `memory-tools/` layer beside them, the templates, and the plugin manifest. Both `PreCompact` matchers are wired: `auto` is the runtime compacting on its own, `manual` is the user typing `/compact`.
 
-`mcp/server.ts` stays unchanged. Register once globally in `~/.claude/settings.json`:
+Two further hooks ship in `adapters/claude-code/hooks/` and are deliberately **absent from `hooks.json`**, because they are per-agent opt-ins wired in the user's own `settings.json`:
 
-```jsonc
-{
-  "mcpServers": {
-    "io-memory": {
-      "command": "node",
-      "args": ["<absolute-path-to>/the-brain/dist/mcp/server.js"],
-      "env": { "GEMINI_API_KEY": "…", "QDRANT_API_KEY": "…" }
-    }
-  }
-}
-```
+- **`persona-inject.sh`** (`SessionStart`) emits `~/agents/$AGENT_NAME/CORE.md` inline plus a static first-action instruction to read the fuller persona files, landing in the session's cached prefix. Persona files live under `~/agents/<name>/`, which is deliberately not the memory silo at `~/.the-brain/agents/<name>/`: one is authored identity, the other is accumulated memory, and they have different lifecycles and different owners. Hook output over 10,000 characters is silently truncated by the runtime, which would deliver a persona stub without any error, so the hook caps the assembled block at 9,500 bytes and emits the wrapper alone with a loud log line rather than a truncated CORE. `scripts/core-guard.mjs` recomputes the same arithmetic at build time and fails `pnpm build`, so an oversized CORE cannot reach a live session at all. The guard's `buildWrapper()` has to stay byte-identical to the hook's `build_wrapper()`; that is the one coupling to watch when editing either.
+- **`obs-inject.sh`** (`SessionStart`) moves the observation block out of the per-turn injection and into the cached prefix, which is cheaper because the block only changes at compaction. Gated on `BRAIN_OBS_VIA_SESSIONSTART=1`, and the same flag switches the per-turn path off, so the block is never injected twice. The gate is what makes a shared `dist` rebuild safe and lets migration proceed one agent at a time.
 
-Provides the `remembering` tool — semantic search over brain + observations + reflections + messages + assets.
+Both fail open: any unexpected condition emits an empty `additionalContext` and exits 0.
 
----
+### Antigravity (`adapters/antigravity/`)
 
-## 4. Per-agent namespacing
+`PreInvocation` and `Stop`. Runs from the checkout via `tsx`; `pnpm build` does not bundle it. Installed by copying `hooks/hooks.json` to `~/agents/<name>/.agents/hooks.json` and substituting the checkout path for `__THE_BRAIN_ROOT__`.
 
-`cwd` is in every hook payload. Use it to scope memory per-agent (per-project):
+The schema differs from Claude Code's by one nesting level and gets this wrong **silently**, validating happily and then never firing. Read [`adapters/antigravity/hooks/README.md`](../adapters/antigravity/hooks/README.md) before editing it. `PreInvocation` fires per model call, so it uses `build-context.sh --emit` and mutates nothing.
 
-```
-~/.openclaw/workspace/           ← primary agent memory dir (existing)
-├── memory/
-│   ├── observations/
-│   ├── reflections/
-│   ├── observer-pointers/        ← per-session JSONL byte offsets
-│   ├── observer-state.json
-│   └── era-summary.md
-└── MEMORY.md
+### OpenClaw (`adapters/openclaw/`)
 
-~/agents/designer/                ← a second agent, its own silo
-├── memory/
-│   ├── observations/
-│   └── …
-└── MEMORY.md
+A plugin plus a hook pack, both built by `pnpm build` into `dist/plugin` and `dist/hooks`. `adapters/openclaw/hooks/core` is a symlink to the repository's `core/`, so the hook pack bundles the same code rather than a copy.
 
-~/agents/researcher/              ← a third, likewise
-├── memory/
-└── MEMORY.md
-```
+### The shared shell layer
 
-**Hook behaviour:** on fire, derive `MEMORY_DIR` from `cwd`:
+`adapters/openclaw/hooks/memory-tools/` holds `observe.sh`, `reflect.sh`, `build-context.sh`, `compress-era.sh` and `_log.sh`. These are the scripts that call the LLM and write memory to disk, and **all three adapters use them**. The Claude Code and Antigravity handlers resolve them through `CLAUDE_PLUGIN_ROOT` / `AGY_PLUGIN_ROOT` when installed, falling back to the checkout path when running from source, and `pnpm build` copies the whole directory into every adapter's `dist/` output.
 
-- If `cwd/memory/` exists → use `cwd/memory/`
-- Else check for `cwd/.the-brain/memory_root` override file
-- Else fall back to a user-global default (`~/.the-brain/memory/` or `BRAIN_MEMORY_DIR` env)
-
-**Parallel sessions in the same project** (same `cwd`) naturally share the same memory dir. They coordinate via the existing `observationInFlight` lock in `observer-state.json`.
+The location is historical: this layer was written when OpenClaw was the only runtime. It has not been moved because relocating it would churn three adapters' resolution paths and every build target for no behavioural gain. Read it as `memory-tools/` that happens to sit under `openclaw/`, not as an OpenClaw-specific component. Moving it to a top-level directory is a reasonable future change, but it is a refactor, not a fix.
 
 ---
 
-## 5. Repo layout
+## 6. Indexing and recall
 
-A dual-adapter layout: a platform-agnostic core, one thin adapter per runtime.
+### Collections
 
-```
-the-brain/
-├── core/                                # platform-agnostic (unchanged)
-│   ├── context-engine/
-│   ├── observer/                        # (new split from adapter — see §7)
-│   ├── indexer/
-│   ├── embedder/
-│   ├── qdrant/
-│   ├── cross-linker/
-│   ├── media-filer/
-│   ├── config.ts
-│   └── env.ts
-├── adapters/
-│   ├── openclaw/                        # existing, unchanged
-│   │   ├── plugin/
-│   │   └── hooks/
-│   └── claude-code/                     # NEW
-│       ├── .claude-plugin/
-│       │   └── plugin.json
-│       ├── hooks/
-│       │   └── hooks.json
-│       ├── bin/
-│       │   ├── user-prompt-submit.sh
-│       │   ├── on-stop.sh
-│       │   └── on-pre-compact.sh
-│       └── src/
-│           ├── user-prompt-submit.ts    # reads MEMORY.md, emits additionalContext
-│           ├── on-stop.ts               # wraps evaluator + observe.sh trigger
-│           ├── on-pre-compact.ts        # force-fire observation
-│           └── memory-root.ts           # cwd → MEMORY_DIR resolution
-├── mcp/server.ts                        # unchanged
-├── daemon/watcher.ts                    # unchanged
-├── cli/index.ts                         # unchanged
-├── memory-tools/                        # scripts stay as-is
-└── scripts/build.mjs                    # updated: also bundles claude-code hooks
-```
+| Collection | Contents |
+|---|---|
+| `brain-vault` | `~/brain/{ideas,decisions,work,projects,learnings}` |
+| `io-observations` | every agent's `memory/observations/` |
+| `io-reflections` | every agent's `memory/reflections/`, `references/`, and `MEMORY.md` |
+| `io-messages` | Claude Code session transcripts under `~/.claude/projects/` |
+| `io-assets` | `~/brain/assets/**` (images, PDFs, audio) |
 
----
+`core/indexer/collection-router.ts` maps a path to its collection by absolute-path substring, not by a workspace-relative prefix: per-agent silos and the legacy layout share no common prefix, and the older prefix logic silently dropped silo files. The `references/` rule deliberately requires **both** an `/agents/` and a `/references/` segment, so a vault path that happens to contain a `references` directory is not mis-routed into a per-agent collection.
 
-## 6. Config
+Every point is tagged with `agentName`, derived from the path, so `remembering` can scope recall to specific silos rather than pattern-matching on source strings.
 
-### Global defaults: `~/.the-brain/config.json`
+### Transcript indexing
 
-```jsonc
-{
-  "memoryDir": "~/.openclaw/workspace/memory",   // fallback if no cwd/memory/
-  "observer": {
-    "messageThreshold": 6,
-    "charThreshold": 500,                         // TODO: token-based (§9)
-    "maxAgeMs": 14400000,                         // 4 hours
-    "minGapMs": 1500000                           // 25 min cooldown
-  },
-  "memoryInjection": {
-    "enabled": true,
-    "maxChars": 40000,
-    "source": "file",                             // "file" | "none"
-    "memoryFile": "${memoryDir}/../MEMORY.md"     // live block lives inside MEMORY.md
-  }
-}
-```
+`core/indexer/messages.ts` is the heaviest path and the one with the most defences, because a single large transcript can otherwise dominate an entire tick:
 
-### Per-project override: `${cwd}/.the-brain/config.json`
+- **Session discovery has no roster.** `core/indexer/cc-session-discovery.ts` reads each transcript's first-line `cwd` and uses its basename as the agent name, falling back to `AGENT_NAME`, then to `default`. A hardcoded directory-to-agent table has to be edited whenever an agent is added or a project moves, and it silently stops indexing whatever it has not been told about. Convention beats configuration here.
+- **Reads are streamed from a verified byte offset**, not by loading the file, so re-indexing a growing transcript costs the delta rather than the whole.
+- **Work is sized to the remaining tick budget** and checkpointed partway, so hitting the ceiling suspends progress rather than discarding it.
+- **Noise is filtered by start-anchored patterns.** Harness-injected wrappers (`<system-reminder>`, `<task-notification>` and similar) are blocked when they *open* a message. The anchoring is essential: an unanchored version of this filter dropped thousands of genuine messages that merely quoted a marker mid-prose. The boundary is deliberate too: block what the harness injects, keep what an agent authors.
+- **Dry-run does not advance session state**, so `EMBED_DRY_RUN=true` is genuinely repeatable.
 
-Additive merge over the global config. Per-project can tune thresholds for busy vs idle projects.
+### The spend gate
 
-### Observer profile presets
+`core/embedder/gate.ts` is the single choke point for every embedding call in the system: text, image, PDF and audio all pass through it. Putting the controls in one shared module means a bypass in an individual embedder is structurally prevented rather than merely discouraged.
 
-Current thresholds (`messageThreshold: 6`, `charThreshold: 500`, `minGapMs: 25min`) were tuned for Gemini/OpenClaw with cost-conscious defaults. Different users want different aggressiveness:
+Three layers:
 
-```jsonc
-// Three preset profiles — users pick one in config, or roll their own
-"observer": {
-  "profile": "balanced",   // "lean" | "balanced" | "generous" | "custom"
-  "custom": { /* only used when profile: "custom" */ }
-}
-```
+1. **Dry run.** `EMBED_DRY_RUN=true` returns zero-vectors, makes no API calls, and the indexer skips Qdrant mutations.
+2. **Per-tick kill switch.** `MAX_EMBEDS_PER_TICK` (default 5,000) is shared across all media types, so the budget is system-wide rather than per-path. Exceeding it throws and halts the tick loudly. `remainingTickBudget()` lets a caller size a unit of work to fit rather than discovering the ceiling by being thrown out of it.
+3. **Daily spend ledger.** A rolling per-UTC-day ledger at `~/.the-brain/logs/embed-spend-ledger.json`, pruned at 30 days, with a soft threshold that warns (`EMBED_DAILY_BUDGET_USD`, default 5) and a hard cap that stops (`EMBED_DAILY_HARD_CAP_USD`, default 20). The kill switch catches one explosive tick; the ledger catches a slow bleed across days.
 
-| Profile | msgThreshold | charThreshold | minGapMs | Use case |
-|---|---|---|---|---|
-| `lean` | 10 | 2000 | 45min | API-key users, cost-sensitive |
-| `balanced` (default) | 6 | 500 | 25min | Current shipped defaults |
-| `generous` | 3 | 250 | 10min | Max plan / unlimited subscription |
+The cost rate (`GEMINI_EMBED_USD_PER_1K_TOKENS`) is derived from observed billing rather than list price, because list price understates the real per-call cost and a budget alert calibrated against it fires far too late to be useful. Override it if pricing changes.
 
-Profile just expands to explicit values at load time. `custom` lets advanced users set their own. This keeps v1 simple (one knob) while accommodating both ends of the cost spectrum.
+### The MCP server
+
+`mcp/server.ts` runs from source over stdio and exposes one tool, `remembering`: semantic search across all five collections, with optional `collections`, `limit` and `agents` filters. Passing `'__own__'` in `agents` resolves to the calling session's `AGENT_NAME`. There is no build step and no `dist/mcp/`.
 
 ---
 
-## 7. Code changes needed in `core/`
+## 7. Environment resolution
 
-The OpenClaw adapter currently has the observer handler in `adapters/openclaw/hooks/hooks/io-observer/handler.ts`. Most of that logic (evaluator, transcript reader, pointer management, noise filter) is platform-agnostic and should move into `core/observer/`:
+Hooks run in a sandboxed environment that does not inherit the user's shell, so every entry point loads an env file at startup. All of them resolve it identically, first hit winning:
 
-```
-core/observer/
-├── evaluator.ts          # evaluateShouldObserve()
-├── transcript.ts         # readTranscriptFromOffset(), pointer I/O
-├── noise-filter.ts       # shouldSkipMessage(), SKIP_PATTERNS
-├── state.ts              # observer-state.json I/O
-└── types.ts              # Pointer, BufferedMessage, EvaluateParams, etc.
-```
+1. `$BRAIN_ENV_FILE`, the explicit override
+2. `~/.the-brain/.env`, the documented default
+3. `~/io-data/.env`, a legacy location kept transparently so installs predating the `~/.the-brain/` layout keep working
 
-Both adapters (`openclaw` and `claude-code`) then import from `core/observer/` and handle only the event-binding + transcript-path derivation specific to their platform.
+The loader fills gaps only: a variable already present in the environment is never overwritten, and a variable defined only in the legacy file is still picked up when the documented file exists but doesn't define it. The same three-candidate shape is used for the indexer state directory (`BRAIN_STATE_DIR`, then `~/.the-brain/state`, then `~/io-data`), so the scripts and the indexer cannot disagree about where state lives.
 
-**Key invariant preserved:** `core/` must not import from `adapters/`.
+The full variable table is in [`README.md`](../README.md#environment-variables).
 
 ---
 
-## 8. Implementation phases
+## 8. Operations
 
-| Phase | Task | Est. |
-|---|---|---|
-| 0 | Extract observer internals from `adapters/openclaw/hooks/hooks/io-observer/handler.ts` into `core/observer/`. Update OpenClaw adapter to import from there. Verify 106/106 tests still pass. | 1-2h |
-| 1 | Write `adapters/claude-code/src/memory-root.ts` — cwd → MEMORY_DIR resolution with override/fallback chain | 30m |
-| 2 | Write `src/user-prompt-submit.ts` — read MEMORY.md live block, emit `additionalContext` JSON. Use existing `readInjectedMemoryBlock()` from `core/context-engine/`. | 1h |
-| 3 | Write `src/on-stop.ts` — wraps `evaluateShouldObserve()` + fires `observe.sh` when due. Uses transcript-pointer logic from `core/observer/`. | 1-2h |
-| 4 | Write `src/on-pre-compact.ts` — force-fire observation regardless of cooldown. `PreCompact` hook payload + behaviour verified via quick live test. | 1h |
-| 5 | Build script — extend `scripts/build.mjs` to bundle the three Claude Code hooks alongside existing the-brain dist. | 30m |
-| 6 | `adapters/claude-code/.claude-plugin/plugin.json` + `hooks/hooks.json` | 30m |
-| 7 | MCP wiring — verify `mcp/server.ts` runs under Claude Code's MCP config. | 30m |
-| 8 | Local install flow — `pnpm build && claude --plugin-dir ./dist/claude-code` (dev) or bake into `~/.claude/settings.json` (permanent) | 30m |
-| 9 | Live UAT — observe memory/observations/ growing during a real session, verify re-injection after a `/compact` | 1h |
-| 10 | Commit + update spec with any deltas | 30m |
-
-**Total: ~8-11h.** Roughly a weekend build.
+- **Daemon.** `pnpm watch` runs `daemon/watcher.ts`: a debounced file watcher over the vault, the silos and the persona paths, re-indexing changed files and cross-linking them. A minimum re-embed interval per file prevents a chatty path from tight-looping. It also starts the media filer and the `poke-agy` watcher.
+- **poke-agy.** `core/poke-agy/index.ts` watches agy-runtime agents' inbox directories and wakes a dormant agent through tmux when a genuine new message lands. An agy agent cannot self-arm a watcher, so without this it only notices a message on its next turn. Scope is deliberately narrow: it considers only agents whose `.runtime` file reads `agy`, and it expects the tmux session to be named `agents`. On any other session name the window probe fails and it does nothing, which is the safe direction but also the invisible one. It runs inside the daemon every agent depends on, so every path is wrapped: it logs failures and never throws.
+- **Health check.** `scripts/health-check.sh` reports on Qdrant, the collections, the systemd units, every agent silo and recent watcher activity. It discovers silos by listing `~/.the-brain/agents/*/` rather than reading a roster, so it needs no edit when an agent is added. `QDRANT_CONTAINER` and `WATCHER_UNIT` override the names it probes.
+- **Blue-green transcript rebuilds.** Point `BRAIN_MESSAGES_COLLECTION` at a new collection and `BRAIN_MESSAGE_INDEX_STATE` at a fresh state file, index into it, then cut over with `scripts/blue-green-swap.sh --new <collection>`. The script is verify-before-destroy: it refuses to drop the old collection unless the new one exists and clears a minimum point count, and without `--confirm` it is a dry run that changes nothing.
+- **Snapshots.** `scripts/snapshot-qdrant.sh` with matching systemd `.service` and `.timer` units. The units use `%h` for the home directory but still assume the checkout is at `%h/the-brain`.
+- **Install test.** `install-test/` is a Docker harness that runs the documented install on a clean `ubuntu:24.04` image across four levels: build, services and MCP handshake, cold-start indexing, and a fixture round-trip through search. It is what verifies the documentation still works for a stranger.
+- **Gates.** `pnpm check:leaks`, `pnpm check:leaks:self-test`, `pnpm check:licence`.
 
 ---
 
-## 9. Out of scope (future work)
+## 9. Known limits
 
-### Token-based thresholds (not char-based)
-
-Current: `charThreshold: 500` — cheap but noisy. Code blocks and prose at same char count have very different information density.
-
-Future: switch to token counting via `@anthropic-ai/tokenizer` or similar. Benefits:
-- Maps directly to what the model sees
-- Consistent across content types
-- Aligns with cost/budget thinking
-- Enables "we're at X% of context window, trigger early" logic
-
-Defer until after v1 ships. Current thresholds work in practice.
-
-### Revisit default thresholds post-launch
-
-Current defaults assumed cost-conscious Gemini/OpenClaw usage. With Claude Code + Max plan, the real usage pattern is way more conversation per unit time. Defaults may need to shift:
-- `balanced` profile might want `charThreshold: 1000` or higher (less frequent fires = less noise in observations)
-- `minGapMs` of 25min is fine; the bottleneck shifts to *how much* we capture per fire, not *how often*
-
-Plan: ship v1 with current `balanced` defaults, watch real observation logs for a week, tune based on data. The profile-preset mechanism makes this a config change, not a code change.
-
-### Dynamic compaction-aware triggers
-
-Read Claude Code's context-usage % from somewhere (`/context` command output? settings API?) and bias observation firing earlier when context is 70%+ full. Pre-empts PreCompact with a gentler version.
-
-### Agent-scoped Qdrant
-
-Current: single Qdrant instance with global collections. For directory-as-agent, each agent should query its own memory by default + optionally cross-search.
-
-Options: metadata-filtered (agent_id field on each point) or collection-per-agent. Defer until we have 2+ agents running.
-
-### Sub-agent awareness
-
-When the main agent spawns a sub-Claude in a different directory (via Agent tool), the sub-Claude inherits that directory's memory. Parent agent's observer should capture the spawn + the result. Needs thinking about transcript-pointer ownership across processes.
-
-### Cross-session memory lease
-
-If I open 3 parallel sessions in the same project, do they all keep writing to the same observations/reflections? Current answer: yes, and they coordinate via `observationInFlight`. But what if session A and session B are having totally different conversations? Do we care?
-
-v1 answer: share. Observations are per-agent (per-project), not per-session. If that causes noise, revisit.
-
----
-
-## 10. Migration strategy
-
-The Brain's OpenClaw adapter stays live throughout. The Claude Code adapter is additive — both can coexist:
-
-- OpenClaw agents keep using the OpenClaw plugin + hook pack
-- New Claude Code agents use the Claude Code adapter
-- Both write to the same Qdrant collections + share the same brain/memory dirs (if they're in the same project)
-- MCP server exposes memory identically to both
-
-Eventual cutover: once your primary agent migrates to Claude Code, OpenClaw goes cold. Keep the OpenClaw adapter for a while as a compatibility shim, then retire when confident.
-
-No big-bang migration. Parallel running is the default state.
-
----
-
-## 11. Open questions
-
-- [ ] What's the `PreCompact` hook payload look like? Does it pass the about-to-be-summarized message range, or just a trigger? (need to test)
-- [ ] `Stop` hook — does it fire on every sub-agent stop too, or only main? If every sub-agent, we might over-observe
-- [ ] `UserPromptSubmit` — can `additionalContext` be 40k chars, or is there a limit? Test empirically
-- [ ] Does Claude Code dedup `additionalContext` if the same text is injected every turn? Or does the memory block repeat itself into the conversation? Might need to hash + skip if unchanged
-- [ ] Session resume — does `/resume` fire `SessionStart` with `source: "resume"`? If so, we can skip cold-start observation check
-- [ ] How does the MCP server access the right memory dir? It's project-scoped now (per-agent), but MCP is global. Either pass `cwd` into every tool call, or make the `remembering` tool take an explicit `agent` param
-
----
-
-## 12. Success criteria
-
-- [ ] During a normal Claude Code session, observations accumulate in `memory/observations/` at the expected cadence (roughly every 25-30 min of active chat)
-- [ ] After a manual `/compact`, the next prompt injects MEMORY.md and the model demonstrably remembers pre-compaction facts
-- [ ] `PreCompact` hook fires and captures a final observation before the compaction finishes
-- [ ] MCP `remembering` tool returns relevant hits on brain files from within a Claude Code session
-- [ ] Multiple parallel sessions in the same project share memory cleanly (no lost observations, no duplicate fires)
-- [ ] Installation is a single edit to `~/.claude/settings.json` + `pnpm build`
+- **The MCP tool schema hardcodes the five collection names**, so a `BRAIN_MESSAGES_COLLECTION` rebuild is invisible to MCP clients even though `core/config.ts` honours it. Changing a published tool schema is a breaking change for clients, so it has not been done casually.
+- **Observation thresholds are character-based, not token-based.** Characters are cheap to count but a poor proxy: a code block and a paragraph of prose at the same character count carry very different amounts of information. Token counting would map to what the model actually sees and to cost.
+- **There is no config schema.** Thresholds and paths come from environment variables and a few state fields, validated ad hoc. A declared schema with an `index-health` command is the obvious next step.
+- **Prompt-injection defence is not shipped.** An agent that reads external content and then writes an observation about it is a path worth defending, and the defence is not in this repository yet.
+- **`poke-agy` assumes one tmux session name.** See §8.
+- **Per-agent `references/` are indexed but not watched.** `pnpm index` picks them up and the collection router routes them correctly, but the daemon's watch list covers the vault, observations, reflections, assets, `MEMORY.md` and persona paths, not `references/`. So an edit to a reference file is live-indexed only on the next full index.
+- **Sub-agent transcripts are skipped** during discovery, on the grounds that parent sessions reference them in their summaries and indexing both would double-count. That is the right default, but it does mean sub-agent-only work is invisible to transcript recall.
