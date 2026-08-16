@@ -91,7 +91,7 @@ describe("detectCollection", () => {
   describe("brain vault", () => {
     it("routes ~/brain/ideas/* to brain-vault", () => {
       expect(
-        detectCollection("/home/test-user/brain/ideas/claude-io-multi-agent-platform.md"),
+        detectCollection("/home/test-user/brain/ideas/multi-agent-memory-platform.md"),
       ).toBe(config.collections.brain);
     });
 
