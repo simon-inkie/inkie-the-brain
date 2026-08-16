@@ -199,7 +199,7 @@ async function runContext() {
       hour: "2-digit",
       minute: "2-digit",
     });
-    const sender = msg.role === "user" ? "Simon" : "Io";
+    const sender = msg.role === "user" ? "User" : "Assistant";
     const preview =
       msg.content.length > 200
         ? msg.content.slice(0, 200) + "..."
@@ -291,6 +291,7 @@ function runAgentInit() {
 
   mkdirSync(join(memoryDir, "observations"), { recursive: true });
   mkdirSync(join(memoryDir, "observer-pointers"), { recursive: true });
+  mkdirSync(join(memoryDir, "prompts"), { recursive: true });
   copyFileSync(
     join(templatesDir, "OBSERVATION-PROMPT.md"),
     join(memoryDir, "OBSERVATION-PROMPT.md"),
@@ -300,6 +301,16 @@ function runAgentInit() {
     join(memoryDir, "live-state.json"),
   );
   copyFileSync(join(templatesDir, "MEMORY.md"), join(agentDir, "MEMORY.md"));
+  for (const lvl of ["0", "1", "2", "3"]) {
+    copyFileSync(
+      join(templatesDir, "prompts", `compress-era-level-${lvl}.md`),
+      join(memoryDir, "prompts", `compress-era-level-${lvl}.md`),
+    );
+  }
+  copyFileSync(
+    join(templatesDir, "prompts", "compress-era-cap.md"),
+    join(memoryDir, "prompts", "compress-era-cap.md"),
+  );
   writeFileSync(join(memoryDir, "observer-state.json"), "{}\n");
 
   console.log(`✅ Created agent dir: ${agentDir}`);
@@ -308,6 +319,7 @@ function runAgentInit() {
   console.log(`   memory/observer-state.json    (bootstrap state)`);
   console.log(`   memory/observations/          (empty)`);
   console.log(`   memory/observer-pointers/     (empty)`);
+  console.log(`   memory/prompts/               (era-compression prompt set)`);
   console.log(`   MEMORY.md                     (live-block template)`);
 
   if (linkDir) {

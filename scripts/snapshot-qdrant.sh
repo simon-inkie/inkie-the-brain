@@ -18,18 +18,24 @@
 #   5. Auto-reindex any collections that have drifted (> 20% below expected)
 #   6. Rotate old snapshots (keep last N)
 #
-# Decision doc: brain/decisions/2026-04-11-qdrant-tmpfs-rescue.md
+# Why the drift check exists: a Qdrant container whose storage mount is
+# tmpfs loses every collection on restart, silently. Phase 1 checks the mount
+# type; phases 4-5 catch the slower version of the same failure.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Defaults ---
 
 KEEP=7
-CONTAINER=qdrant-io
+CONTAINER="${QDRANT_CONTAINER:-qdrant}"
 HOST_BACKUP_DIR="${HOME}/io-data/qdrant-rescue/snapshots"
 ENV_FILE="${HOME}/io-data/.env"
 QDRANT_URL="http://localhost:6333"
-BRAIN_DIR="${HOME}/io-projects/the-brain"
+# Resolved from this script's own location so the reindex step works from any
+# checkout, not just one particular install path.
+BRAIN_DIR="$(cd -P "$SCRIPT_DIR/.." && pwd)"
 COLLECTIONS=(brain-vault io-observations io-reflections io-messages io-assets)
 SKIP_REINDEX=false
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
-Documentation=file://%h/io-projects/the-brain/README.md
+Documentation=file://%h/the-brain/README.md
 
 [Timer]
 # Run every day at 03:00 local time

@@ -12,6 +12,9 @@
 #
 # Stop:
 #   systemctl --user stop the-brain-watcher
+#
+# Adjust WorkingDirectory and EnvironmentFile below if your checkout or env
+# file live elsewhere; systemd cannot resolve those paths itself.
 
 [Unit]
 Description=The Brain File Watcher — auto-indexes brain + memory files into Qdrant
@@ -19,7 +22,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/io-projects/the-brain
+WorkingDirectory=%h/the-brain
 ExecStart=%h/.local/share/pnpm/pnpm watch
 Restart=on-failure
 RestartSec=5

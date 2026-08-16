@@ -59,6 +59,18 @@ describe("agent init", () => {
       ),
     ).toBe(true);
 
+    // The era-compression prompt set is seeded per agent so a silo can
+    // re-distill without reaching back into the checkout's templates/.
+    expect(existsSync(join(memory, "prompts"))).toBe(true);
+    for (const lvl of ["0", "1", "2", "3"]) {
+      expect(
+        existsSync(join(memory, "prompts", `compress-era-level-${lvl}.md`)),
+      ).toBe(true);
+    }
+    expect(existsSync(join(memory, "prompts", "compress-era-cap.md"))).toBe(
+      true,
+    );
+
     // observer-state.json bootstraps to empty JSON object so observe.sh's
     // jq update pattern succeeds on first run.
     expect(readFileSync(join(memory, "observer-state.json"), "utf-8").trim())

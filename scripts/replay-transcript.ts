@@ -13,7 +13,7 @@
  *
  * Usage:
  *   npx tsx scripts/replay-transcript.ts \
- *     --transcript ~/.claude/projects/-home-simon-xxx/abc.jsonl \
+ *     --transcript ~/.claude/projects/-home-user-myproject/abc.jsonl \
  *     --memory ~/.the-brain/agents/foo/memory \
  *     [--chunk-messages 40] [--chunk-chars 80000] [--dry-run]
  *
