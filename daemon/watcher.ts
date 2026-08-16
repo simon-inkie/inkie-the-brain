@@ -9,11 +9,19 @@ import { deleteBySource } from "../core/qdrant/client.js";
 import { ensureCollections, getCollectionPointCount } from "../core/qdrant/client.js";
 import { relative } from "path";
 import { startMediaFilerWatcher } from "../core/media-filer/index.js";
+import { startPokeAgyWatcher } from "../core/poke-agy/index.js";
 import { crossLinkFile } from "../core/cross-linker/index.js";
 import { detectCollection } from "../core/indexer/collection-router.js";
+import { resetTickCounter } from "../core/embedder/gate.js";
 
-const DEBOUNCE_MS = 2000;
+const DEBOUNCE_MS = 5000;
 const ASSET_DEBOUNCE_MS = 5000;
+
+// Minimum interval between re-embeds for the same file.
+// Even if debounce fires, skip if the file was embedded less than
+// MIN_REEMBED_MS ago (prevents tight-loop re-embedding on chatty paths).
+const MIN_REEMBED_MS = 60_000;
+const lastEmbedTs = new Map<string, number>();
 
 const ASSET_EXTENSIONS = new Set([
   ...config.assetIndexing.imageExtensions,
@@ -57,7 +65,17 @@ function handleFileChange(filePath: string): void {
     setTimeout(async () => {
       timers.delete(filePath);
 
+      // Per-file cooldown: skip if re-embedded too recently.
+      const last = lastEmbedTs.get(filePath);
+      if (last !== undefined && Date.now() - last < MIN_REEMBED_MS) {
+        log(`Skipping (cooldown active): ${relativePath(filePath)}`);
+        return;
+      }
+
+      resetTickCounter();
+
       if (asset) {
+        lastEmbedTs.set(filePath, Date.now());
         try {
           await indexAssetFile(filePath);
           log(`Indexed asset: ${relativePath(filePath)}`);
@@ -74,6 +92,7 @@ function handleFileChange(filePath: string): void {
         return;
       }
       try {
+        lastEmbedTs.set(filePath, Date.now());
         await indexFile(filePath);
         log(`Indexed: ${relativePath(filePath)}`);
 
@@ -310,6 +329,9 @@ async function main(): Promise<void> {
 
   // Start media filer — watches ~/.openclaw/media/inbound/ and copies to brain/assets/
   startMediaFilerWatcher(log);
+
+  // Start poke-agy — watches agy-runtime agents' inboxes and tmux-wakes them on a new DM
+  startPokeAgyWatcher(log);
 
   log("Watcher running. Press Ctrl+C to stop.");
 
