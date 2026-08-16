@@ -11,7 +11,8 @@
 import "../core/env.js";
 import { readdir, stat, copyFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
-import { join } from "path";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { indexFile } from "../core/indexer/files.js";
 import { ensureCollections } from "../core/qdrant/client.js";
@@ -32,7 +33,10 @@ if (!existsSync(agentRoot)) {
 // re-run — never overwrites existing files. Matches what
 // `the-brain agent init` creates for a fresh silo.
 async function seedScaffolding(agentRoot: string): Promise<void> {
-  const templatesDir = join(homedir(), "io-projects", "the-brain", "templates");
+  // repoRoot = one level up from scripts/, same resolution the CLI's
+  // `agent init` uses, so the seed works from any checkout location.
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const templatesDir = join(repoRoot, "templates");
   if (!existsSync(templatesDir)) {
     console.error(
       `[seed] templates dir missing at ${templatesDir} — skipping scaffolding seed`,
@@ -43,6 +47,7 @@ async function seedScaffolding(agentRoot: string): Promise<void> {
   await mkdir(join(memoryDir, "observations"), { recursive: true });
   await mkdir(join(memoryDir, "observer-pointers"), { recursive: true });
   await mkdir(join(memoryDir, "reflections"), { recursive: true });
+  await mkdir(join(memoryDir, "prompts"), { recursive: true });
 
   const pairs: [string, string][] = [
     [join(templatesDir, "MEMORY.md"), join(agentRoot, "MEMORY.md")],
@@ -53,6 +58,26 @@ async function seedScaffolding(agentRoot: string): Promise<void> {
     [
       join(templatesDir, "live-state.json"),
       join(memoryDir, "live-state.json"),
+    ],
+    [
+      join(templatesDir, "prompts", "compress-era-level-0.md"),
+      join(memoryDir, "prompts", "compress-era-level-0.md"),
+    ],
+    [
+      join(templatesDir, "prompts", "compress-era-level-1.md"),
+      join(memoryDir, "prompts", "compress-era-level-1.md"),
+    ],
+    [
+      join(templatesDir, "prompts", "compress-era-level-2.md"),
+      join(memoryDir, "prompts", "compress-era-level-2.md"),
+    ],
+    [
+      join(templatesDir, "prompts", "compress-era-level-3.md"),
+      join(memoryDir, "prompts", "compress-era-level-3.md"),
+    ],
+    [
+      join(templatesDir, "prompts", "compress-era-cap.md"),
+      join(memoryDir, "prompts", "compress-era-cap.md"),
     ],
   ];
   for (const [src, dst] of pairs) {

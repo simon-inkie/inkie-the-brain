@@ -5,8 +5,7 @@
  * files under per-agent silos at `~/.the-brain/agents/<name>/memory/` don't
  * share a common workspace-relative prefix with the legacy OpenClaw paths, and
  * the old prefix logic silently dropped them (returning null → watcher logged
- * "Skipping (unknown collection)"). See brain-todo
- * 2026-04-21-fix-io-memory-detect-collection.md for the surfaced incident.
+ * "Skipping (unknown collection)").
  *
  * Returns null for files that don't match any known collection — caller decides
  * whether that's a skip or a default-to-brain fallback.
@@ -21,6 +20,14 @@ export function detectCollection(filePath: string): string | null {
     return config.collections.reflections;
   }
   if (filePath.endsWith("/MEMORY.md")) {
+    return config.collections.reflections;
+  }
+  // Hand-written references (agents/<name>/references/*.md) - curated durable
+  // captures, routed to the reflections collection. Require BOTH /agents/ AND
+  // /references/ so a brain-vault path that happens to contain a "references"
+  // segment (e.g. ~/brain/projects/.../references/) is NOT mis-routed to a
+  // per-agent reflections collection - it falls through to the brain check below.
+  if (filePath.includes("/agents/") && filePath.includes("/references/")) {
     return config.collections.reflections;
   }
   if (filePath.includes("/brain/") && !filePath.includes("/memory/")) {

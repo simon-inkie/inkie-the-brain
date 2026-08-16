@@ -109,7 +109,7 @@ describe("reconcileState (brain/obs/refl indexer)", () => {
   });
 
   it("REGRESSION: the 2026-04-11 tmpfs scenario (225+ → 7) wipes state", async () => {
-    // This mirrors the exact Simon incident: state file says 225+ files
+    // This mirrors the incident that motivated reconcile: state file says 225+ files
     // across brain-vault, Qdrant actually has 7 points.
     const state = brainState(225, 2); // 450 expected points
     const { log, messages } = capturingLog();

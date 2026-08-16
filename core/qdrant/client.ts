@@ -132,7 +132,11 @@ function buildDateClauses(
   if (!from && !to) return [];
 
   // io-messages stores numeric `timestampMs`; everything else stores `date` as YYYY-MM-DD string.
-  if (collection === "io-messages") {
+  // Compare to the configured messages collection (not a literal) so the date
+  // logic still tracks when the name is overridden for the v2 rebuild, and after
+  // the alias swap (alias name == default). Equivalent to "io-messages" when
+  // BRAIN_MESSAGES_COLLECTION is unset — zero behaviour change for production.
+  if (collection === config.collections.messages) {
     const range: Record<string, number> = {};
     if (from) range.gte = new Date(from).getTime();
     if (to) range.lte = new Date(to).getTime();

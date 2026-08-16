@@ -192,6 +192,25 @@ function chunkContent(content: string, title: string): Chunk[] {
   return chunks.length > 0 ? chunks : [{ content, title }];
 }
 
+/**
+ * Parse a file's frontmatter, tolerating malformed YAML. gray-matter THROWS on a
+ * bad frontmatter block, and a single bad file must NOT abort the whole index run
+ * (one uncaught throw here silently killed semantic recall across the whole
+ * workspace for days). Returns null on a parse failure so the caller logs + skips + continues.
+ */
+export function safeParseFrontmatter(
+  content: string,
+  filePath: string
+): ReturnType<typeof matter> | null {
+  try {
+    return matter(content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`⚠️  Skipping ${filePath}: malformed frontmatter (${msg})`);
+    return null;
+  }
+}
+
 async function indexFileInternal(
   filePath: string,
   collection: string,
@@ -206,8 +225,12 @@ async function indexFileInternal(
     return { chunks: state.files[relPath].chunks, skipped: true };
   }
 
-  // Parse frontmatter
-  const { data: frontmatter, content: body } = matter(content);
+  // Parse frontmatter (resilient: a malformed file is skipped, never aborts the run).
+  const parsed = safeParseFrontmatter(content, filePath);
+  if (!parsed) {
+    return { chunks: 0, skipped: true };
+  }
+  const { data: frontmatter, content: body } = parsed;
   const title = (frontmatter.title as string) || extractTitle(body, filePath);
   const date =
     (frontmatter.date as string) || extractDate(body, basename(filePath));
@@ -351,51 +374,65 @@ export async function indexAll(): Promise<void> {
   let totalIndexed = 0;
   let totalSkipped = 0;
   let totalChunks = 0;
+  let removed = 0;
 
-  // Index brain directories
-  for (const dir of config.sources.brain) {
-    console.error(`Indexing brain: ${dir}`);
-    const r = await indexDirectory(dir, config.collections.brain, state);
-    totalIndexed += r.indexed;
-    totalSkipped += r.skipped;
-    totalChunks += r.chunks;
+  try {
+    // Index brain directories
+    for (const dir of config.sources.brain) {
+      console.error(`Indexing brain: ${dir}`);
+      const r = await indexDirectory(dir, config.collections.brain, state);
+      totalIndexed += r.indexed;
+      totalSkipped += r.skipped;
+      totalChunks += r.chunks;
+    }
+
+    // Index observations
+    for (const dir of config.sources.observations) {
+      console.error(`Indexing observations: ${dir}`);
+      const r = await indexDirectory(dir, config.collections.observations, state);
+      totalIndexed += r.indexed;
+      totalSkipped += r.skipped;
+      totalChunks += r.chunks;
+    }
+
+    // Index reflections
+    for (const dir of config.sources.reflections) {
+      console.error(`Indexing reflections: ${dir}`);
+      const r = await indexDirectory(dir, config.collections.reflections, state);
+      totalIndexed += r.indexed;
+      totalSkipped += r.skipped;
+      totalChunks += r.chunks;
+    }
+
+    // Index references (hand-written captures; same collection as reflections)
+    for (const dir of config.sources.references) {
+      console.error(`Indexing references: ${dir}`);
+      const r = await indexDirectory(dir, config.collections.reflections, state);
+      totalIndexed += r.indexed;
+      totalSkipped += r.skipped;
+      totalChunks += r.chunks;
+    }
+
+    // Index MEMORY.md
+    console.error(`Indexing MEMORY.md`);
+    const memResult = await indexMemoryMd(state);
+    if (memResult.skipped) {
+      totalSkipped++;
+    } else {
+      totalIndexed++;
+      totalChunks += memResult.chunks;
+    }
+
+    // Clean removed files
+    console.error("Cleaning removed files...");
+    removed = await cleanRemovedFiles(state);
+
+    // Mark clean completion - only stamped on a fully clean pass, never on a cap-halt
+    state.lastFullIndex = new Date().toISOString();
+  } finally {
+    // Persist partial OR full progress so the next tick resumes where this one stopped
+    await saveState(state);
   }
-
-  // Index observations
-  for (const dir of config.sources.observations) {
-    console.error(`Indexing observations: ${dir}`);
-    const r = await indexDirectory(dir, config.collections.observations, state);
-    totalIndexed += r.indexed;
-    totalSkipped += r.skipped;
-    totalChunks += r.chunks;
-  }
-
-  // Index reflections
-  for (const dir of config.sources.reflections) {
-    console.error(`Indexing reflections: ${dir}`);
-    const r = await indexDirectory(dir, config.collections.reflections, state);
-    totalIndexed += r.indexed;
-    totalSkipped += r.skipped;
-    totalChunks += r.chunks;
-  }
-
-  // Index MEMORY.md
-  console.error(`Indexing MEMORY.md`);
-  const memResult = await indexMemoryMd(state);
-  if (memResult.skipped) {
-    totalSkipped++;
-  } else {
-    totalIndexed++;
-    totalChunks += memResult.chunks;
-  }
-
-  // Clean removed files
-  console.error("Cleaning removed files...");
-  const removed = await cleanRemovedFiles(state);
-
-  // Save state
-  state.lastFullIndex = new Date().toISOString();
-  await saveState(state);
 
   console.error(
     `\nDone: ${totalIndexed} files indexed (${totalChunks} chunks), ${totalSkipped} unchanged, ${removed} removed`

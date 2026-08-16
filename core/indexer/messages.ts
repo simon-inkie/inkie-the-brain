@@ -1,8 +1,11 @@
 import { readFile, writeFile, readdir, stat, mkdir } from "fs/promises";
+import { createReadStream } from "fs";
+import { createInterface } from "readline";
 import { join, basename, dirname } from "path";
 import { createHash } from "crypto";
 import { config } from "../config.js";
-import { embedTexts } from "../embedder/text.js";
+import { embedTexts, resetTickCounter, flushTelemetry } from "../embedder/text.js";
+import { isDryRun, remainingTickBudget, MAX_EMBEDS_PER_TICK } from "../embedder/gate.js";
 import { ensureCollections, client, getCollectionPointCount } from "../qdrant/client.js";
 import { discoverCCSessions, type DiscoveredSession } from "./cc-session-discovery.js";
 
@@ -41,6 +44,37 @@ interface CCSessionState {
   lastSize: number;
   lastModified: string;
   pairsIndexed: number;
+  // NEW — optional for back-compat with existing state file entries.
+  // lastPairIndex: highest pair index that has been embedded (0-based).
+  // firstPairUuid: userMessageId of pair[0] — used to detect content rewrites.
+  lastPairIndex?: number;
+  firstPairUuid?: string;
+  // partial: this checkpoint covers only a PREFIX of the file's pairs — the
+  // tick's embed budget ran out mid-session. Absent = complete (every existing
+  // state entry written before this landed is complete by definition, so
+  // back-compat is automatic). A partial entry must NOT be early-skipped on an
+  // unchanged file, otherwise a cold session freezes half-indexed forever.
+  partial?: true;
+  // --- Append-only resume point (see readCCSessionPairs) -------------------
+  // A verified byte position the NEXT tick can start reading from, so a session
+  // transcript is not re-read and re-parsed from byte 0 on every tick.
+  //
+  // These three MUST be written and read as a unit. `lastSize` is deliberately
+  // NOT reused as the seek offset: it records the size of the file at the last
+  // READ, while a partial checkpoint's committed pairs may end far earlier —
+  // seeking to lastSize on a partial session would skip every parsed-but-not-
+  // embedded pair, silently and permanently.
+  //
+  // resumeLineStart: byte offset where the LAST LINE of pair
+  //   (resumePairCount - 1) begins. That line is re-read and hash-checked
+  //   before anything after it is trusted, so a wrong offset degrades to a
+  //   full read rather than to a mis-parse.
+  // resumeLineHash: fingerprint of that line's text — the check above.
+  // resumePairCount: how many pairs (global, 0-based indices 0..n-1) the file
+  //   yields up to and including that line.
+  resumeLineStart?: number;
+  resumeLineHash?: string;
+  resumePairCount?: number;
 }
 
 interface MessageIndexState {
@@ -67,6 +101,56 @@ interface ExtractedMessage {
   content: string;
   timestamp: string;
   timestampMs: number;
+}
+
+// --- File reading ---
+
+interface ReadLinesResult {
+  lines: string[];
+  /** Absolute byte offset at which lines[i] begins. */
+  starts: number[];
+}
+
+/**
+ * Read a JSONL transcript into its individual lines WITHOUT ever materialising
+ * the whole file as one JS string, optionally starting at a byte offset.
+ *
+ * `readFile(path, "utf-8")` builds a single string for the entire file, and V8
+ * caps a string at `buffer.constants.MAX_STRING_LENGTH` (~512MB on Node 22).
+ * A session transcript past that ceiling threw `RangeError: Invalid string
+ * length` before a single line was parsed, so the session could never index —
+ * deterministically, on every tick, forever (one live agent's transcript passed
+ * 1GB and had zero indexed messages as a result).
+ *
+ * Streaming through `readline` yields one bounded line at a time. Only the SUM
+ * of a transcript's lines approaches the V8 limit; no individual JSONL line
+ * comes close, so the parsers downstream keep their existing `string[]`
+ * contract unchanged.
+ *
+ * `starts` is accumulated as `byteLength(line) + 1`, assuming single-`\n`
+ * terminators (what every CC transcript writer emits). If that assumption were
+ * ever wrong the offsets would drift — which is why nothing seeks on an offset
+ * without re-reading and hash-checking the line it points at first. A drift
+ * therefore costs a full re-read, never a mis-parse.
+ */
+async function readFileLines(filePath: string, startOffset = 0): Promise<ReadLinesResult> {
+  const lines: string[] = [];
+  const starts: number[] = [];
+  let offset = startOffset;
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: "utf-8", start: startOffset }),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
+    lines.push(line);
+    starts.push(offset);
+    offset += Buffer.byteLength(line, "utf-8") + 1;
+  }
+  return { lines, starts };
+}
+
+function lineFingerprint(line: string): string {
+  return createHash("sha256").update(line).digest("hex").slice(0, 16);
 }
 
 // --- State management ---
@@ -257,14 +341,35 @@ interface CCPair {
   assistantMessageId: string | null;
   timestamp: string;
   timestampMs: number;
+  /**
+   * Index (into the `lines` array this pair was parsed from) of the LAST line
+   * that contributes to this pair, or null when this pair is not a safe place
+   * to resume from.
+   *
+   * Only null for the trailing user-with-no-response pair: an assistant line
+   * appended later ABSORBS that user into a complete pair, so a resume point
+   * after it would mis-parse the assistant as an orphan and permanently lose
+   * the user half of the pair. Every other pair is final the moment it is
+   * emitted and can never be changed by a later append.
+   */
+  endLineIndex: number | null;
 }
 
-function parseCCSessionFile(lines: string[]): CCPair[] {
+/**
+ * @param startPairIndex global index to assign to the first pair emitted.
+ *   Non-zero when only the appended SUFFIX of a transcript is being parsed —
+ *   pair indices are the identity of a point in Qdrant (ccPointId), so a suffix
+ *   parse must continue the numbering, never restart it at 0.
+ */
+function parseCCSessionFile(lines: string[], startPairIndex = 0): CCPair[] {
   const pairs: CCPair[] = [];
-  let currentUser: { content: string; id: string; timestamp: string; timestampMs: number } | null = null;
-  let pairIndex = 0;
+  let currentUser:
+    | { content: string; id: string; timestamp: string; timestampMs: number; lineIndex: number }
+    | null = null;
+  let pairIndex = startPairIndex;
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
     if (!line.trim()) continue;
 
     let parsed: Record<string, unknown>;
@@ -295,7 +400,9 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
     const timestampMs = new Date(timestampStr).getTime();
 
     if (type === "user") {
-      // Flush previous user if it had no assistant response
+      // Flush previous user if it had no assistant response. A NEW user line
+      // closes it for good, so it IS a safe resume point — and the boundary is
+      // the old user's own line, not this one.
       if (currentUser) {
         pairs.push({
           pairIndex: pairIndex++,
@@ -305,6 +412,7 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
           assistantMessageId: null,
           timestamp: currentUser.timestamp,
           timestampMs: currentUser.timestampMs,
+          endLineIndex: currentUser.lineIndex,
         });
       }
       currentUser = {
@@ -312,6 +420,7 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
         id: (parsed.uuid as string) || (parsed.promptId as string) || "",
         timestamp: timestampStr,
         timestampMs,
+        lineIndex,
       };
     } else if (type === "assistant") {
       if (currentUser) {
@@ -323,6 +432,7 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
           assistantMessageId: (parsed.uuid as string) || "",
           timestamp: currentUser.timestamp,
           timestampMs: currentUser.timestampMs,
+          endLineIndex: lineIndex,
         });
         currentUser = null;
       } else {
@@ -335,12 +445,13 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
           assistantMessageId: (parsed.uuid as string) || "",
           timestamp: timestampStr,
           timestampMs,
+          endLineIndex: lineIndex,
         });
       }
     }
   }
 
-  // Flush trailing user with no response
+  // Flush trailing user with no response. NOT a resume point — see endLineIndex.
   if (currentUser) {
     pairs.push({
       pairIndex: pairIndex++,
@@ -350,6 +461,7 @@ function parseCCSessionFile(lines: string[]): CCPair[] {
       assistantMessageId: null,
       timestamp: currentUser.timestamp,
       timestampMs: currentUser.timestampMs,
+      endLineIndex: null,
     });
   }
 
@@ -404,6 +516,117 @@ function chunkPairText(pair: CCPair): string[] {
   return chunks;
 }
 
+interface CCParseResult {
+  /** Pairs parsed THIS tick — the appended suffix only, on a resumed read. */
+  pairs: CCPair[];
+  /** Global pair index of pairs[0]. Always 0 on a full read. */
+  basePairIndex: number;
+  /** Pairs the WHOLE file yields: basePairIndex + pairs.length. */
+  totalPairs: number;
+  /** Read started at byte 0, so pairs[0] really is the file's first pair. */
+  fullRead: boolean;
+  /** The lines `pairs` were parsed from, with their absolute byte offsets. */
+  lines: string[];
+  starts: number[];
+}
+
+function toParseResult(
+  lines: string[],
+  starts: number[],
+  basePairIndex: number,
+  fullRead: boolean,
+): CCParseResult {
+  const pairs = parseCCSessionFile(lines, basePairIndex);
+  return { pairs, basePairIndex, totalPairs: basePairIndex + pairs.length, fullRead, lines, starts };
+}
+
+async function readCCSessionFull(filePath: string): Promise<CCParseResult> {
+  const { lines, starts } = await readFileLines(filePath);
+  return toParseResult(lines, starts, 0, true);
+}
+
+/**
+ * Read a CC transcript, skipping the prefix already accounted for when that is
+ * provably safe.
+ *
+ * A transcript is append-only in normal operation, so re-reading and re-parsing
+ * it from byte 0 on every tick is pure waste — and on a multi-gigabyte session
+ * it is most of the tick. Seeking is only sound if the bytes before the seek
+ * point are unchanged, which is exactly what a rewrite would violate, so this
+ * takes the fast path only when BOTH of these hold:
+ *
+ *  1. The file grew (`fileSize > lastSize`) or is byte-for-byte untouched
+ *     (`fileSize === lastSize` AND the mtime is the one already recorded). A
+ *     shrink is a trim; the same size with a new mtime is a same-length
+ *     rewrite. Neither is an append, and both need the whole file so the
+ *     rewrite guards in indexCCSession can see pair[0] and the real pair count.
+ *  2. The line the recorded offset points at still hashes to the recorded
+ *     fingerprint. This is what makes a WRONG offset harmless: a drifted or
+ *     stale offset lands on different bytes, the hash disagrees, and the read
+ *     degrades to a full one instead of silently mis-parsing or skipping pairs.
+ *
+ * The verification line is re-read and then dropped — parsing continues from
+ * the line after it.
+ */
+async function readCCSessionPairs(
+  filePath: string,
+  existing: CCSessionState | undefined,
+  fileSize: number,
+  fileModified: string,
+): Promise<CCParseResult> {
+  const resumeLineStart = existing?.resumeLineStart;
+  const resumePairCount = existing?.resumePairCount;
+  const resumeLineHash = existing?.resumeLineHash;
+
+  const appendOnly =
+    existing !== undefined &&
+    (fileSize > existing.lastSize ||
+      (fileSize === existing.lastSize && fileModified === existing.lastModified));
+
+  if (
+    appendOnly &&
+    typeof resumeLineStart === "number" &&
+    typeof resumePairCount === "number" &&
+    typeof resumeLineHash === "string" &&
+    resumeLineStart >= 0 &&
+    resumeLineStart < fileSize
+  ) {
+    const { lines, starts } = await readFileLines(filePath, resumeLineStart);
+    if (lines.length > 0 && lineFingerprint(lines[0]) === resumeLineHash) {
+      return toParseResult(lines.slice(1), starts.slice(1), resumePairCount, false);
+    }
+    console.error(
+      `[cc-indexer] resume point for ${basename(filePath)} did not verify at byte ` +
+        `${resumeLineStart} — re-reading the whole file`
+    );
+  }
+
+  return readCCSessionFull(filePath);
+}
+
+/**
+ * The resume point to persist: the last line of the newest pair at or before
+ * `uptoPairIndex` that is a safe boundary. Walks backwards, because the newest
+ * pair may be a trailing user awaiting its assistant (endLineIndex null).
+ * Returns undefined when this parse contains no safe boundary at all, in which
+ * case the caller keeps whatever it already had rather than inventing one.
+ */
+function resumePointFor(
+  parse: CCParseResult,
+  uptoPairIndex: number,
+): Pick<CCSessionState, "resumeLineStart" | "resumeLineHash" | "resumePairCount"> | undefined {
+  for (let i = Math.min(uptoPairIndex - parse.basePairIndex, parse.pairs.length - 1); i >= 0; i--) {
+    const pair = parse.pairs[i];
+    if (pair.endLineIndex === null) continue;
+    return {
+      resumeLineStart: parse.starts[pair.endLineIndex],
+      resumeLineHash: lineFingerprint(parse.lines[pair.endLineIndex]),
+      resumePairCount: pair.pairIndex + 1,
+    };
+  }
+  return undefined;
+}
+
 async function indexCCSession(
   session: DiscoveredSession,
   state: MessageIndexState,
@@ -417,47 +640,220 @@ async function indexCCSession(
   if (
     existing &&
     existing.lastSize === fileSize &&
-    existing.lastModified === fileModified
+    existing.lastModified === fileModified &&
+    // A PARTIAL checkpoint must re-enter even when the file has not changed —
+    // the remaining pairs are still unindexed and nothing else will ever bring
+    // them in (a finished session's file never changes again).
+    !existing.partial
   ) {
     return { indexed: 0, skipped: existing.pairsIndexed };
   }
 
-  const raw = await readFile(session.filePath, "utf-8");
-  const lines = raw.split("\n");
-  const pairs = parseCCSessionFile(lines);
+  // Resolve effective lastPairIndex from state (back-compat: old entries
+  // have pairsIndexed but no lastPairIndex).
+  const existingPairsIndexed = existing?.pairsIndexed ?? 0;
+  const existingLastPairIndex =
+    existing?.lastPairIndex ?? (existingPairsIndexed > 0 ? existingPairsIndexed - 1 : undefined);
 
-  if (pairs.length === 0) {
-    state.ccSessions[stateKey] = {
-      file: basename(session.filePath),
-      projectDir: session.projectDir,
-      agentName: session.agentName,
-      lastSize: fileSize,
-      lastModified: fileModified,
-      pairsIndexed: 0,
-    };
+  let parse = await readCCSessionPairs(session.filePath, existing, fileSize, fileModified);
+
+  // A suffix parse cannot see pair[0] or the true pair count, which the rewrite
+  // guards below are built on. Any sign that the suffix is not enough — the
+  // total went BACKWARDS, or a pair we need to act on sits before the seek
+  // point — and the tick pays for a full read rather than guessing.
+  if (!parse.fullRead) {
+    const totalWentBackwards = parse.totalPairs < existingPairsIndexed;
+    const needsPairBeforeSeek =
+      existingLastPairIndex !== undefined && existingLastPairIndex + 1 < parse.basePairIndex;
+    const needsLastPairReEmbed =
+      parse.totalPairs === existingPairsIndexed &&
+      fileSize > (existing?.lastSize ?? 0) &&
+      existingLastPairIndex !== undefined &&
+      existingLastPairIndex < parse.basePairIndex;
+    if (totalWentBackwards || needsPairBeforeSeek || needsLastPairReEmbed) {
+      parse = await readCCSessionFull(session.filePath);
+    }
+  }
+
+  const { pairs, basePairIndex, totalPairs } = parse;
+  /** A pair by its GLOBAL index — the suffix is not zero-based. */
+  const pairAt = (globalIndex: number): CCPair | undefined =>
+    globalIndex < basePairIndex ? undefined : pairs[globalIndex - basePairIndex];
+
+  if (totalPairs === 0) {
+    if (!isDryRun()) {
+      state.ccSessions[stateKey] = {
+        file: basename(session.filePath),
+        projectDir: session.projectDir,
+        agentName: session.agentName,
+        lastSize: fileSize,
+        lastModified: fileModified,
+        pairsIndexed: 0,
+      };
+    }
     return { indexed: 0, skipped: 0 };
   }
 
-  // Delete previous points for this session (handles re-indexing on growth)
   const sourceValue = `cc:${session.projectDir}/${session.sessionId}`;
-  await client.delete(config.collections.messages, {
-    wait: true,
-    filter: {
-      must: [{ key: "source", match: { value: sourceValue } }],
-    },
-  });
+  const collection = config.collections.messages;
+  const batchSize = 100;
 
-  // Chunk all pairs and build embedding texts
+  // -----------------------------------------------------------------
+  // Tri-guard decision tree — incremental indexing
+  // -----------------------------------------------------------------
+
+  let pairsToEmbed: CCPair[];
+  let fullReEmbed = false;
+
+  // Both guards need the whole file. A suffix parse only ever happens after
+  // readCCSessionPairs established the file was appended to or untouched, which
+  // is precisely the case in which neither guard can fire.
+  if (parse.fullRead) {
+    if (totalPairs < existingPairsIndexed) {
+      // Pair count DROPPED — file trimmed or rewritten. Full re-embed.
+      fullReEmbed = true;
+    } else if (
+      existing?.firstPairUuid &&
+      pairs[0]?.userMessageId !== undefined &&
+      pairs[0].userMessageId !== existing.firstPairUuid
+    ) {
+      // First pair's identity changed — content rewritten in place. Full re-embed.
+      fullReEmbed = true;
+    }
+  }
+
+  if (fullReEmbed) {
+    // Delete all existing points for this session, then embed from scratch.
+    if (process.env.EMBED_DRY_RUN !== "true") {
+      await client.delete(config.collections.messages, {
+        wait: true,
+        filter: { must: [{ key: "source", match: { value: sourceValue } }] },
+      });
+    }
+    pairsToEmbed = pairs;
+  } else {
+    // Delta path: embed only new pairs since lastPairIndex.
+    // Also defensively re-embed the last already-embedded pair if bytes grew
+    // (covers in-progress pair that grew without a new pair being appended).
+    if (existingLastPairIndex === undefined) {
+      // First run: no state at all — embed everything.
+      pairsToEmbed = pairs;
+    } else if (totalPairs === existingPairsIndexed && fileSize > (existing?.lastSize ?? 0)) {
+      // Same pair count but file grew — re-embed the last pair defensively.
+      pairsToEmbed = [pairAt(existingLastPairIndex)].filter(Boolean) as CCPair[];
+    } else {
+      // Normal growth: embed pairs from lastPairIndex+1 onward.
+      pairsToEmbed = pairs.slice(existingLastPairIndex + 1 - basePairIndex);
+    }
+    // No delete needed — upsert is safe (ccPointId is deterministic).
+  }
+
+  // Backfill firstPairUuid for sessions that existed before this code landed.
+  // Log every backfill so post-hoc grep can surface anomalies.
+  //
+  // On the FULL RE-EMBED path the stored uuid is the one we just invalidated —
+  // persisting it would re-trigger the rewrite guard on the very next tick and,
+  // now that a partial checkpoint re-enters an unchanged file, delete-and-restart
+  // forever without ever finishing. A full re-embed adopts the CURRENT pair[0].
+  //
+  // A suffix parse has no pair[0] to read, so it can only carry forward what
+  // state already holds — which is sound precisely because a suffix parse means
+  // the file was appended to, leaving pair[0] untouched.
+  const currentFirstUuid = parse.fullRead ? (pairs[0]?.userMessageId ?? null) : null;
+  const resolvedFirstPairUuid = fullReEmbed
+    ? (currentFirstUuid ?? undefined)
+    : (existing?.firstPairUuid ?? currentFirstUuid ?? undefined);
+  if (!existing?.firstPairUuid && currentFirstUuid) {
+    console.error(
+      `[cc-indexer] backfill firstPairUuid for ${session.sessionId} from current pair[0]: ${currentFirstUuid}`
+    );
+  }
+
+  // Where the next tick may start reading. Computed against the pairs this tick
+  // actually COMMITS, never against everything parsed — a partial checkpoint
+  // that recorded the end of the file would strand every parsed-but-unembedded
+  // pair. `?? existingResumePoint` keeps a still-valid recorded point when this
+  // parse offers no safe boundary of its own; a full re-embed discards it,
+  // since the pair numbering it referred to no longer applies.
+  const existingResumePoint = fullReEmbed
+    ? undefined
+    : {
+        resumeLineStart: existing?.resumeLineStart,
+        resumeLineHash: existing?.resumeLineHash,
+        resumePairCount: existing?.resumePairCount,
+      };
+
+  if (pairsToEmbed.length === 0) {
+    // Nothing new to embed — just update the state timestamps.
+    if (!isDryRun()) {
+      state.ccSessions[stateKey] = {
+        file: basename(session.filePath),
+        projectDir: session.projectDir,
+        agentName: session.agentName,
+        lastSize: fileSize,
+        lastModified: fileModified,
+        pairsIndexed: totalPairs,
+        lastPairIndex: totalPairs > 0 ? totalPairs - 1 : existingLastPairIndex,
+        firstPairUuid: resolvedFirstPairUuid,
+        ...(resumePointFor(parse, totalPairs - 1) ?? existingResumePoint),
+      };
+    }
+    return { indexed: 0, skipped: existing?.pairsIndexed ?? 0 };
+  }
+
+  // -----------------------------------------------------------------
+  // Bounded pair-prefix selection (resumable quota halts)
+  // -----------------------------------------------------------------
+  // Kill-switch counter is reset at tick-start in indexAllMessages, NOT per
+  // session: a ceiling expressed per agent ("total ≤ 50 × N_active_agents")
+  // only catches a system-wide regression if the budget pools across sessions.
+  //
+  // Chunk every candidate pair once, then take the LONGEST PREFIX OF COMPLETE
+  // PAIRS whose cumulative chunk count fits what is left of this tick's budget.
+  // Sizing the work to the budget means chargeTick never has to throw here, and
+  // a pair can never be split across ticks (boundaries intact by construction,
+  // not by a downstream repair). Whatever does not fit rolls to the next tick.
+  const chunkedPairs = pairsToEmbed.map((pair) => ({ pair, chunks: chunkPairText(pair) }));
+
+  const budget = remainingTickBudget();
+  const selected: { pair: CCPair; chunks: string[] }[] = [];
+  let selectedChunks = 0;
+  for (const candidate of chunkedPairs) {
+    if (selectedChunks + candidate.chunks.length > budget) break;
+    selected.push(candidate);
+    selectedChunks += candidate.chunks.length;
+  }
+
+  if (selected.length === 0) {
+    // Not even the first candidate pair fits. Leave state untouched — claiming
+    // progress we did not make is the failure this whole change exists to kill.
+    const firstPairChunks = chunkedPairs[0].chunks.length;
+    if (firstPairChunks > MAX_EMBEDS_PER_TICK) {
+      // Degenerate: this pair cannot fit a WHOLE tick, so no amount of waiting
+      // helps. Loud and visibly stuck beats silently skipped forever.
+      console.error(
+        `[cc-indexer] ⚠️  STUCK: ${session.agentName}/${session.sessionId} pair ${chunkedPairs[0].pair.pairIndex} ` +
+          `needs ${firstPairChunks} chunks, more than the entire per-tick cap (${MAX_EMBEDS_PER_TICK}). ` +
+          `This session cannot advance until the cap is raised for a one-off run or the oversized pair is investigated. ` +
+          `State left untouched.`
+      );
+    } else {
+      console.error(
+        `[cc-indexer] ${session.agentName}/${session.sessionId}: ${budget} chunk(s) of tick budget left, ` +
+          `next pair needs ${firstPairChunks} — deferred to the next tick`
+      );
+    }
+    return { indexed: 0, skipped: existing?.pairsIndexed ?? 0 };
+  }
+
   const allChunks: { pair: CCPair; chunkIndex: number; totalChunks: number; text: string }[] = [];
-  for (const pair of pairs) {
-    const chunks = chunkPairText(pair);
+  for (const { pair, chunks } of selected) {
     for (let i = 0; i < chunks.length; i++) {
       allChunks.push({ pair, chunkIndex: i, totalChunks: chunks.length, text: chunks[i] });
     }
   }
 
   // Batch embed
-  const batchSize = 100;
   const allVectors: number[][] = [];
   for (let i = 0; i < allChunks.length; i += batchSize) {
     const batch = allChunks.slice(i, i + batchSize).map((c) => c.text);
@@ -469,12 +865,11 @@ async function indexCCSession(
   }
 
   // Build points
-  const collection = config.collections.messages;
   const points = allChunks.map((c, i) => ({
     id: ccPointId(session.projectDir, session.sessionId, c.pair.pairIndex, c.chunkIndex),
     vector: allVectors[i],
     payload: {
-      source: `cc:${session.projectDir}/${session.sessionId}`,
+      source: sourceValue,
       sessionId: session.sessionId,
       pairIndex: c.pair.pairIndex,
       chunk: c.chunkIndex,
@@ -491,20 +886,45 @@ async function indexCCSession(
     },
   }));
 
-  // Upsert in batches
-  for (let i = 0; i < points.length; i += batchSize) {
-    const batch = points.slice(i, i + batchSize);
-    await client.upsert(collection, { wait: true, points: batch });
+  // Upsert in batches (skip when dry-run)
+  if (process.env.EMBED_DRY_RUN !== "true") {
+    for (let i = 0; i < points.length; i += batchSize) {
+      const batch = points.slice(i, i + batchSize);
+      await client.upsert(collection, { wait: true, points: batch });
+    }
   }
 
-  state.ccSessions[stateKey] = {
-    file: basename(session.filePath),
-    projectDir: session.projectDir,
-    agentName: session.agentName,
-    lastSize: fileSize,
-    lastModified: fileModified,
-    pairsIndexed: pairs.length,
-  };
+  // Checkpoint. lastPairIndex advances only through the last FULLY COMMITTED
+  // pair — every point of every pair up to it has been upserted above. Upsert
+  // happens before the state mutation, so a crash in between re-embeds at most
+  // this one slice, idempotently (ccPointId is deterministic).
+  const committedLastPairIndex = selected[selected.length - 1].pair.pairIndex;
+  const isPartial = committedLastPairIndex < totalPairs - 1;
+
+  if (!isDryRun()) {
+    state.ccSessions[stateKey] = {
+      file: basename(session.filePath),
+      projectDir: session.projectDir,
+      agentName: session.agentName,
+      lastSize: fileSize,
+      lastModified: fileModified,
+      pairsIndexed: committedLastPairIndex + 1,
+      lastPairIndex: committedLastPairIndex,
+      firstPairUuid: resolvedFirstPairUuid,
+      ...(resumePointFor(parse, committedLastPairIndex) ?? existingResumePoint),
+      // Completion omits `partial` entirely, which also CLEARS it on the tick
+      // that finishes a previously partial session.
+      ...(isPartial ? { partial: true as const } : {}),
+    };
+  }
+
+  if (isPartial) {
+    console.error(
+      `[cc-indexer] ${session.agentName}/${session.sessionId}: partial checkpoint — ` +
+        `pairs 0..${committedLastPairIndex} of ${pairs.length} committed ` +
+        `(${allChunks.length} chunks this tick); resumes next tick`
+    );
+  }
 
   return { indexed: allChunks.length, skipped: 0 };
 }
@@ -532,9 +952,12 @@ export async function indexSessionFile(
     return { indexed: 0, skipped: existing.messagesIndexed };
   }
 
-  // Read and parse
-  const raw = await readFile(filePath, "utf-8");
-  const lines = raw.split("\n");
+  // Read and parse. Same streaming read as the CC path: this indexer is still
+  // live (indexAllMessages calls it on every non-agent-filtered tick, over a
+  // sessions dir that exists and holds real .jsonl files), and it carries the
+  // identical unbounded-string hazard. Fixing only the transcript that happens
+  // to be oversized today would leave the second crash site armed.
+  const { lines } = await readFileLines(filePath);
 
   const messages = parseSessionFile(lines, sessionId);
 
@@ -605,6 +1028,10 @@ export async function indexAllMessages(
   if (!state.ccSessions) state.ccSessions = {};
   state = await reconcileMessageState(state);
 
+  // Reset kill-switch counter at tick-start. Budget pools across all sessions
+  // processed in this tick, so the ceiling is system-wide rather than per session.
+  resetTickCounter();
+
   let totalIndexed = 0;
   let totalSkipped = 0;
   let sessionsProcessed = 0;
@@ -661,7 +1088,20 @@ export async function indexAllMessages(
       ` across ${new Set(ccFiltered.map((s) => s.projectDir)).size} project dirs`
   );
 
-  for (const session of ccFiltered) {
+  for (let si = 0; si < ccFiltered.length; si++) {
+    const session = ccFiltered[si];
+
+    // Tick budget spent — stop the loop cleanly. Every session already
+    // processed keeps its (possibly partial) checkpoint; the rest resume on the
+    // next tick. One log line, not one quota error per remaining session.
+    if (remainingTickBudget() <= 0) {
+      console.error(
+        `[cc-indexer] tick embed budget spent (${MAX_EMBEDS_PER_TICK}/tick) — stopping cleanly, ` +
+          `${ccFiltered.length - si} session(s) deferred to the next tick`
+      );
+      break;
+    }
+
     try {
       const result = await indexCCSession(session, state);
       if (result.indexed > 0) {
@@ -683,6 +1123,9 @@ export async function indexAllMessages(
     Object.values(state.sessions).reduce((sum, s) => sum + s.messagesIndexed, 0) +
     Object.values(state.ccSessions).reduce((sum, s) => sum + s.pairsIndexed, 0);
   await saveState(state);
+
+  // Flush telemetry JSONL after state is saved
+  await flushTelemetry();
 
   return { sessionsProcessed, indexed: totalIndexed, skipped: totalSkipped };
 }

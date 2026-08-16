@@ -4,26 +4,47 @@ import { config } from "../../core/config.js";
 
 describe("detectCollection", () => {
   describe("per-agent silos (the regression this fix addresses)", () => {
-    it("routes ~/.the-brain/agents/inkie-io/memory/observations/* to io-observations", () => {
+    it("routes ~/.the-brain/agents/alice/memory/observations/* to io-observations", () => {
       expect(
         detectCollection(
-          "/home/test-user/.the-brain/agents/inkie-io/memory/observations/2026-04-21-14-05-22.md",
+          "/home/test-user/.the-brain/agents/alice/memory/observations/2026-04-21-14-05-22.md",
         ),
       ).toBe(config.collections.observations);
     });
 
-    it("routes ~/.the-brain/agents/inkie-io/memory/reflections/* to io-reflections", () => {
+    it("routes ~/.the-brain/agents/alice/memory/reflections/* to io-reflections", () => {
       expect(
         detectCollection(
-          "/home/test-user/.the-brain/agents/inkie-io/memory/reflections/2026-04-21-14-05-22.md",
+          "/home/test-user/.the-brain/agents/alice/memory/reflections/2026-04-21-14-05-22.md",
         ),
       ).toBe(config.collections.reflections);
     });
 
     it("routes per-agent MEMORY.md to io-reflections", () => {
       expect(
-        detectCollection("/home/test-user/.the-brain/agents/inkie-io/MEMORY.md"),
+        detectCollection("/home/test-user/.the-brain/agents/alice/MEMORY.md"),
       ).toBe(config.collections.reflections);
+    });
+
+    it("routes per-agent references/*.md to io-reflections", () => {
+      expect(
+        detectCollection(
+          "/home/test-user/.the-brain/agents/alice/references/support-tone.md",
+        ),
+      ).toBe(config.collections.reflections);
+      expect(
+        detectCollection(
+          "/home/test-user/.the-brain/agents/bob/references/cancellation-email.md",
+        ),
+      ).toBe(config.collections.reflections);
+    });
+
+    it("does NOT mis-route a brain-vault references/ path to reflections", () => {
+      // A brain-vault path with a "references" segment must fall through to the
+      // brain collection, not the per-agent reflections collection.
+      expect(
+        detectCollection("/home/test-user/brain/projects/the-brain/references/spec.md"),
+      ).toBe(config.collections.brain);
     });
 
     it("works for arbitrary future agent names", () => {
@@ -38,7 +59,7 @@ describe("detectCollection", () => {
         ),
       ).toBe(config.collections.reflections);
       expect(
-        detectCollection("/home/test-user/.the-brain/agents/inkie-bugfix-2/MEMORY.md"),
+        detectCollection("/home/test-user/.the-brain/agents/harness-bugfix-2/MEMORY.md"),
       ).toBe(config.collections.reflections);
     });
   });
@@ -122,16 +143,16 @@ describe("agentNameFromPath", () => {
 
     it("extracts name from per-agent MEMORY.md", () => {
       expect(
-        agentNameFromPath("/home/test-user/.the-brain/agents/doctor-two/MEMORY.md"),
-      ).toBe("doctor-two");
+        agentNameFromPath("/home/test-user/.the-brain/agents/courier-two/MEMORY.md"),
+      ).toBe("courier-two");
     });
 
     it("handles hyphenated names", () => {
       expect(
         agentNameFromPath(
-          "/home/test-user/.the-brain/agents/inkie-bugfix-2/memory/reflections/2026-04-19.md",
+          "/home/test-user/.the-brain/agents/harness-bugfix-2/memory/reflections/2026-04-19.md",
         ),
-      ).toBe("inkie-bugfix-2");
+      ).toBe("harness-bugfix-2");
     });
   });
 
