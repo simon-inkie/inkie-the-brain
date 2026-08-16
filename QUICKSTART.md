@@ -53,8 +53,8 @@ Same data shape; the brain doesn't care which side of the network it's talking t
 ## 2. Clone, install, build
 
 ```bash
-git clone https://github.com/simon-inkie/the-brain
-cd the-brain
+git clone https://github.com/simon-inkie/inkie-the-brain
+cd inkie-the-brain
 pnpm install
 pnpm build
 ```

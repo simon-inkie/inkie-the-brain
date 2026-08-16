@@ -14,15 +14,20 @@ HOME_DIR="$HOME"
 QDRANT_CONTAINER="${QDRANT_CONTAINER:-qdrant}"
 WATCHER_UNIT="${WATCHER_UNIT:-the-brain-watcher.service}"
 
-# Load env vars
-if [[ -f "$HOME_DIR/io-data/.env" ]]; then
-  while IFS='=' read -r key val; do
-    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-    val="${val%%#*}"
-    val="$(echo "$val" | xargs)"
-    export "$key=$val" 2>/dev/null
-  done < "$HOME_DIR/io-data/.env"
-fi
+# Load env vars. Candidates in precedence order: $BRAIN_ENV_FILE,
+# ~/.the-brain/.env (the documented location), ~/io-data/.env (legacy, kept for
+# installs that predate the ~/.the-brain/ layout). First one present wins.
+for env_file in "${BRAIN_ENV_FILE:-}" "$HOME_DIR/.the-brain/.env" "$HOME_DIR/io-data/.env"; do
+  if [[ -n "$env_file" && -f "$env_file" ]]; then
+    while IFS='=' read -r key val; do
+      [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+      val="${val%%#*}"
+      val="$(echo "$val" | xargs)"
+      export "$key=$val" 2>/dev/null
+    done < "$env_file"
+    break
+  fi
+done
 
 PASS="✅"
 FAIL="❌"

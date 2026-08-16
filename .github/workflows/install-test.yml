@@ -56,9 +56,11 @@ jobs:
       - name: pnpm build
         run: pnpm build
 
+      # Gating. This was continue-on-error while a known media-filer typing gap
+      # was outstanding; that gap is closed and the whole tree typechecks clean,
+      # so a failure here is a real regression rather than a known exception.
       - name: pnpm typecheck
-        run: pnpm typecheck || echo "typecheck has known pre-existing media-filer issues — not gating in v0"
-        continue-on-error: true
+        run: pnpm typecheck
 
       - name: pnpm test
         run: pnpm test

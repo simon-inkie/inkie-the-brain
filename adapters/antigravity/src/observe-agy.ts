@@ -23,17 +23,28 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 // Best-effort env load — mirrors the CC adapter preamble.
-try {
-  const envPath = resolve(homedir(), "io-data", ".env");
-  const content = readFileSync(envPath, "utf-8");
-  for (const line of content.split("\n")) {
-    const match = line.match(/^([^#]\w*)=(.+)$/);
-    if (match && !process.env[match[1]]) {
-      process.env[match[1]] = match[2].trim();
+//
+// Candidates in precedence order: BRAIN_ENV_FILE, then ~/.the-brain/.env (the
+// documented location), then ~/io-data/.env (legacy, kept so an install that
+// predates the ~/.the-brain/ layout keeps working). Mirrors core/env.ts,
+// inlined here because it has to run before the imports below.
+for (const envPath of [
+  process.env.BRAIN_ENV_FILE,
+  resolve(homedir(), ".the-brain", ".env"),
+  resolve(homedir(), "io-data", ".env"),
+]) {
+  if (!envPath) continue;
+  try {
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const match = line.match(/^([^#]\w*)=(.+)$/);
+      if (match && !process.env[match[1]]) {
+        process.env[match[1]] = match[2].trim();
+      }
     }
+  } catch {
+    /* .env not found */
   }
-} catch {
-  /* .env not found */
 }
 
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";

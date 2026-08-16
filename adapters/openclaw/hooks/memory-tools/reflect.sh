@@ -146,11 +146,20 @@ log info "state-reset" "{}"
 # Rebuild current-context.md
 bash "$SCRIPT_DIR/build-context.sh"
 
-# Source ~/io-data/.env so both this script and any spawned child processes
-# inherit EMBED_DRY_RUN, GEMINI_API_KEY, QDRANT_API_KEY etc.
-# `set -a` auto-exports every assignment until `set +a`.
+# Source the env file so both this script and any spawned child processes
+# inherit EMBED_DRY_RUN, GEMINI_API_KEY, QDRANT_API_KEY etc. Candidates in
+# precedence order: $BRAIN_ENV_FILE, ~/.the-brain/.env (the documented
+# location), ~/io-data/.env (legacy, kept for installs that predate the
+# ~/.the-brain/ layout). Sourced LOWEST precedence first so a later file
+# overrides an earlier one. `set -a` auto-exports until `set +a`.
 set -a
-. ~/io-data/.env 2>/dev/null || true
+for _env_file in ~/io-data/.env ~/.the-brain/.env "${BRAIN_ENV_FILE:-}"; do
+    # `if`, not `a && b && c`: under `set -e` a failing AND-OR list is fatal.
+    if [ -n "$_env_file" ] && [ -f "$_env_file" ]; then
+        . "$_env_file"
+    fi
+done
+unset _env_file
 set +a
 
 # Locate a the-brain checkout that can run the CLI from source. BRAIN_ROOT

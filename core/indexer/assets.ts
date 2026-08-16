@@ -69,7 +69,8 @@ export interface AssetReconcileOptions {
 }
 
 /**
- * Drift detection for asset state. See brain/decisions/2026-04-11-qdrant-tmpfs-rescue.md.
+ * Drift detection for asset state. Same failure mode, and the same reasoning,
+ * as reconcileState in files.ts.
  * Pure function modulo injectable getCount — testable.
  */
 export async function reconcileAssetState(

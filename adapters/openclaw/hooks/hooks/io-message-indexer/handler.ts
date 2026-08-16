@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 
-// Side-effect import: loads ~/io-data/.env into process.env
+// Side-effect import: loads the brain's env file into process.env (see core/env.ts)
 import "../../core/env.js";
 
 import { embedText } from "../../core/embedder/text.js";

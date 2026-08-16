@@ -181,7 +181,7 @@ export function shouldWake(input: WakeDecisionInput): WakeDecision {
  * Extract the REAL author of the LAST message block from a thread file's text.
  *
  * Block headers look like:
- *   ## 2026-06-13T22:53:00Z - from: io - status: sent - subject: ...
+ *   ## 2026-06-13T22:53:00Z - from: alice - status: sent - subject: ...
  * Delimiters vary by dialect (hyphen or em-dash, spacing differs), but the
  * stable tokens are an ISO-ish timestamp and a `from:` field. Message blocks are
  * separated by a line of three-or-more dashes (`---`), the DM-format delimiter.

@@ -26,7 +26,11 @@ WorkingDirectory=%h/the-brain
 ExecStart=%h/.local/share/pnpm/pnpm watch
 Restart=on-failure
 RestartSec=5
-EnvironmentFile=%h/io-data/.env
+# Both optional (the leading '-'), so a missing file is not a start failure.
+# Listed legacy-first: systemd lets a later file override an earlier one, so
+# ~/.the-brain/.env (the documented location) wins where both exist.
+EnvironmentFile=-%h/io-data/.env
+EnvironmentFile=-%h/.the-brain/.env
 
 [Install]
 WantedBy=default.target

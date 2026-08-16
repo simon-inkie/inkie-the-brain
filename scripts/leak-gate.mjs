@@ -355,21 +355,22 @@ const RULES = [
  * Narrow, audited carve-outs: one exact repo-relative path paired with one
  * exact rule label.
  *
- * Both entries here exist for the same reason, and it is a reason no regex
+ * Every entry here exists for the same reason, and it is a reason no regex
  * can encode. An open-source project is legally required to name its
- * copyright holder, and a published package is expected to name a
- * contactable author. In those two fields the real identity is not a leak
- * that slipped through: it is the field's entire purpose, and removing it
- * would make the licence unenforceable and the package unattributable.
- * Everywhere else in this repository the same strings are leaks, and the
+ * copyright holder, a published package is expected to name a contactable
+ * author, and a security policy is worthless without a route to a human. In
+ * those fields the real identity is not a leak that slipped through: it is
+ * the field's entire purpose, and removing it would make the licence
+ * unenforceable, the package unattributable and the disclosure policy a dead
+ * end. Everywhere else in this repository the same strings are leaks, and the
  * rules still fire on them.
  *
- * The alternative was a gate that is permanently red on two lines that are
+ * The alternative was a gate that is permanently red on three lines that are
  * never going to change, which within a fortnight becomes a gate nobody
- * reads. Whether the author field should carry a personal address or a role
- * address is an open question for the owner; if it becomes a role address,
- * the second entry here should be deleted and the self-test will insist on
- * it.
+ * reads. Whether the author and security-contact fields should carry a
+ * personal address or a role address is an open question for the owner; if
+ * they become role addresses, the address entries here should be deleted and
+ * the self-test will insist on it.
  */
 const EXEMPTIONS = [
   {
@@ -386,6 +387,16 @@ const EXEMPTIONS = [
     file: "package.json",
     label: "company-email-address",
     why: "The author field's contact address, in the same line as the entry above.",
+  },
+  {
+    file: "SECURITY.md",
+    label: "principal-first-name",
+    why: "The security-disclosure contact address, whose local part is the same first name. A policy that tells a researcher to report privately and then names no private route sends them to the public issue tracker instead, which is the outcome the policy exists to prevent.",
+  },
+  {
+    file: "SECURITY.md",
+    label: "company-email-address",
+    why: "The security-disclosure contact address, the same published address as the package manifest's author field.",
   },
 ];
 

@@ -30,8 +30,25 @@ SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 KEEP=7
 CONTAINER="${QDRANT_CONTAINER:-qdrant}"
-HOST_BACKUP_DIR="${HOME}/io-data/qdrant-rescue/snapshots"
-ENV_FILE="${HOME}/io-data/.env"
+# State, backup and env locations. The default is the ~/.the-brain/ layout the
+# rest of the project uses; ~/io-data/ is kept as a transparent fallback so an
+# install that predates that layout keeps working. Same treatment (and the same
+# BRAIN_STATE_DIR override) as the indexer state dir in core/config.ts.
+if [ -n "${BRAIN_STATE_DIR:-}" ]; then
+    STATE_DIR="$BRAIN_STATE_DIR"
+elif [ -d "${HOME}/io-data" ]; then
+    STATE_DIR="${HOME}/io-data"
+else
+    STATE_DIR="${HOME}/.the-brain/state"
+fi
+HOST_BACKUP_DIR="${BRAIN_SNAPSHOT_DIR:-${HOME}/.the-brain/snapshots}"
+ENV_FILE=""
+for _candidate in "${BRAIN_ENV_FILE:-}" "${HOME}/.the-brain/.env" "${HOME}/io-data/.env"; do
+    if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
+        ENV_FILE="$_candidate"
+        break
+    fi
+done
 QDRANT_URL="http://localhost:6333"
 # Resolved from this script's own location so the reindex step works from any
 # checkout, not just one particular install path.
@@ -63,7 +80,7 @@ fail() { log "FAIL: $*"; exit 1; }
 
 # --- Pre-flight checks ---
 
-[ -f "$ENV_FILE" ] || fail "env file not found: $ENV_FILE"
+[ -n "$ENV_FILE" ] || fail "no env file found (looked for \$BRAIN_ENV_FILE, ~/.the-brain/.env, ~/io-data/.env)"
 QDRANT_API_KEY="$(grep '^QDRANT_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
 [ -n "$QDRANT_API_KEY" ] || fail "QDRANT_API_KEY not found in $ENV_FILE"
 
@@ -80,7 +97,7 @@ mount_type="$(docker exec "$CONTAINER" mount 2>/dev/null | awk '/\/qdrant\/stora
 if [ "$mount_type" = "tmpfs" ]; then
     log "🚨 WARNING: $CONTAINER /qdrant/storage is tmpfs — data is in RAM only!"
     log "   Snapshot will proceed (rescue copy) but the underlying mount MUST be fixed."
-    log "   See brain/decisions/2026-04-11-qdrant-tmpfs-rescue.md"
+    log "   Every collection is lost on the next container restart."
 elif [ -z "$mount_type" ]; then
     log "WARNING: could not determine /qdrant/storage mount type (continuing anyway)"
 else
@@ -154,9 +171,9 @@ $jq_expr
     fi
 }
 
-INDEX_STATE="${HOME}/io-data/io-memory-index-state.json"
-MSG_STATE="${HOME}/io-data/io-message-index-state.json"
-ASSET_STATE="${HOME}/io-data/io-asset-index-state.json"
+INDEX_STATE="${STATE_DIR}/io-memory-index-state.json"
+MSG_STATE="${STATE_DIR}/io-message-index-state.json"
+ASSET_STATE="${STATE_DIR}/io-asset-index-state.json"
 
 DRIFT_COLLECTIONS=()
 

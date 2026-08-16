@@ -1,101 +1,139 @@
-# Observation Contract Spec — Agent-Identity-Aware Observations
+# Observation contract: identity-aware observations
 
-**Status:** v1 shipped 2026-04-17. Template canonical at `templates/OBSERVATION-PROMPT.md`.
-**Context:** [CLAUDE-CODE-PORT-SPEC.md](./CLAUDE-CODE-PORT-SPEC.md), [multi-agent architecture](#future-multi-agent-implications).
+**Status:** v1, shipped 2026-04-17. Canonical template: [`templates/OBSERVATION-PROMPT.md`](./templates/OBSERVATION-PROMPT.md).
 
 ---
 
-## 1. The bug that surfaced this contract
+## 1. The failure this contract prevents
 
-The Brain's memory pipeline works like this:
+The memory pipeline runs like this:
 
 ```
-Claude Code session (any cwd)
+Any Claude Code session, in any working directory
   └─ Stop hook → observe.sh → LLM → observation.md → build-context.sh → MEMORY.md
                                                                           │
                                                                           ▼
-  OpenClaw-hosted Io session ─── reads MEMORY.md on prompt → acts on <current-task>
+              The agent that owns that memory dir ─── reads MEMORY.md on prompt
+                                                      → acts on <current-task>
 ```
 
-On 2026-04-17, a project at `~/git-repos/<some-other-project>` Claude Code session hit a vite bundle error. The observer captured it. `build-context.sh` promoted it into MEMORY.md's `<current-task>` block. Io's next turn read the live block, decided "fix npm run dev vite corruption" was its job, and tried to execute `pnpm add @dnd-kit/*` + `npm run dev` against the project's working repo via OpenClaw's exec tool. io-auto-mode flagged the unfamiliar path → Telegram approval requests fired.
+An observation is not only a record. It can also carry a `<current-task>` block,
+which the owning agent reads on its next turn as *what I was doing*. That makes
+the observer's output a task queue, and a task queue is only safe if every entry
+in it belongs to the agent reading it.
 
-The memory pipeline worked flawlessly. The **semantics** were wrong: the observer emitted a `<current-task>` that wasn't Io's task.
+The failure mode, observed in practice: a Claude Code session working in an
+unrelated project hit a build error. The observer captured it correctly.
+`build-context.sh` promoted it into the `<current-task>` block of a memory dir
+that a *different*, long-running agent reads. That agent's next turn read the
+live block, decided the build error was its job, and started running package
+manager commands against a repository it had never seen and had no context on.
+
+The pipeline worked exactly as designed. The **semantics** were wrong: the
+observer emitted a continuation directive for a session that was not the
+reading agent's own.
 
 ## 2. The contract
 
-Observations serve two distinct purposes:
+Observations serve two distinct purposes, and only one of them is safe to emit
+for an arbitrary session:
 
 | Purpose | Consumer | Output |
 |---|---|---|
-| **Memory** | Any future session that reads the vault | `<observations>` — pure captured information |
-| **Continuation** | Io specifically, resuming its own work after compaction | `<current-task>` + `<suggested-response>` — directive for what Io should do next |
+| **Memory** | Any future session that reads the vault | `<observations>` — captured information, nothing directive |
+| **Continuation** | The owning agent, resuming its own work after compaction | `<current-task>` + `<suggested-response>` — a directive for what to do next |
 
-**Rule:** continuation tags are only valid when the source conversation is Io's own. Emitting them for any other agent's session produces a false task-queue entry that Io will try to action, with no context on the other agent's work.
+**Rule:** continuation tags are valid only when the source conversation is the
+owning agent's own. Emitting them for any other session produces a false
+task-queue entry that the owning agent will try to action, with no context on
+the work it is picking up.
 
 ## 3. Detection mechanism
 
-The observation-prompt LLM detects agent identity by the **speaker label** used in the transcript slice:
+The observation-prompt LLM decides which of the two shapes to emit from the
+**speaker label** used for the assistant's turns in the transcript slice. The
+template is parameterised on `{AGENT_NAME}`, substituted at seed time:
 
-| Transcript format | Source | Action |
+| Assistant label in the transcript | Source | Action |
 |---|---|---|
-| `[HH:MM] Io: ...` | OpenClaw-hosted Io session | Emit full format (obs + current-task + suggested-response) |
-| `[HH:MM] Assistant: ...` | Claude Code session (any agent) | Emit `<observations>` only |
-| `[HH:MM] Claude: ...` | Other Claude deployment | Emit `<observations>` only |
-| Anything else | Unknown | Emit `<observations>` only |
+| `{AGENT_NAME}` | The owning agent's own session | Full format: observations + current-task + suggested-response |
+| `Assistant` | A Claude Code session (any agent) | `<observations>` only |
+| `Claude` | Another Claude deployment | `<observations>` only |
+| Anything else | Unknown | `<observations>` only |
 
-Transcript formatting is the responsibility of the adapter:
+Producing that label is the adapter's job:
 
-- `adapters/openclaw/hooks/hooks/io-observer/handler.ts::triggerObservation` → formats with `{USER_NAME}:` / `{AGENT_NAME}:` (substituted from env vars; see template `OBSERVATION-PROMPT.md`)
-- `adapters/claude-code/src/observe-trigger.ts::formatTranscript` → formats with `User:` / `Assistant:` (Claude Code's canonical labels)
+- `adapters/openclaw/hooks/hooks/io-observer/handler.ts` formats with
+  `$USER_NAME:` / `$AGENT_NAME:` (falling back to `User:` / `Agent:`), so a
+  session hosted by that adapter is labelled as the owning agent.
+- `adapters/claude-code/src/observe-trigger.ts` and
+  `adapters/antigravity/src/observe-agy.ts` both format with `User:` /
+  `Assistant:`, the canonical labels of those runtimes.
 
-Both adapters therefore give the LLM an unambiguous signal. Any future adapter must choose labels that make the agent's identity clear at the transcript level.
+Both label schemes give the LLM an unambiguous signal. **Any new adapter must
+choose labels that make the session's identity clear at the transcript level**,
+or its sessions will be observed under the wrong half of this contract.
 
-## 4. Template canonical location
+## 4. Template location and seeding
 
-Source of truth: `templates/OBSERVATION-PROMPT.md` in The Brain repo.
+Source of truth: [`templates/OBSERVATION-PROMPT.md`](./templates/OBSERVATION-PROMPT.md).
 
-Build pipeline copies it to:
+`scripts/build.mjs` copies it into both adapter bundles:
 
 - `dist/hooks/templates/OBSERVATION-PROMPT.md` (OpenClaw hook pack)
 - `dist/claude-code/templates/OBSERVATION-PROMPT.md` (Claude Code adapter)
 
-Runtime consumption: `observe.sh` reads `${MEMORY_DIR}/OBSERVATION-PROMPT.md` with an embedded fallback prompt if the file is missing. New memory directories need to seed the template explicitly — **no runtime auto-seeding today**.
+At runtime, `observe.sh` reads `${MEMORY_DIR}/OBSERVATION-PROMPT.md`, with an
+embedded fallback prompt if the file is missing. A memory dir therefore needs
+its own copy.
 
-### Manual seeding (today)
-
-```bash
-# For a new agent directory
-cp dist/claude-code/templates/OBSERVATION-PROMPT.md <agent-memory-dir>/OBSERVATION-PROMPT.md
-```
-
-### Planned seeding (future, unstarted)
-
-When `claude-io/<agent>/` worktrees are scaffolded (see [multi-agent architecture](#future-multi-agent-implications)), seeding should happen at agent-creation time as part of the bootstrap flow. Target helper:
+`the-brain agent init <name>` seeds one, along with the era-compression prompt
+set, when it creates the silo:
 
 ```bash
-the-brain agent init <agent-name>
-# → creates ~/.the-brain/agents/<name>/memory/
-# → seeds OBSERVATION-PROMPT.md, OBSERVATION-PROMPT-NON-IO.md (if we split)
-# → writes <agent-worktree>/.the-brain/memory_root pointer
+the-brain agent init <name>
+# → ~/.the-brain/agents/<name>/memory/OBSERVATION-PROMPT.md
+# → ~/.the-brain/agents/<name>/memory/prompts/compress-era-*.md
 ```
 
-## 5. Future: multi-agent implications
+For a memory dir that predates the CLI, or one created by hand, copy the
+template in directly:
 
-Once the multi-agent platform (`claude-io/<agent>/` worktrees + per-agent memory at `~/.the-brain/agents/<name>/`) is live, the identity model generalises:
+```bash
+cp templates/OBSERVATION-PROMPT.md <memory-dir>/OBSERVATION-PROMPT.md
+```
 
-**Per-agent memory dirs resolve via tier 1 of `resolveMemoryDir()`**, so each agent's observations stay private to its own memory. Cross-contamination (the bug that motivated this spec) becomes structurally impossible — the feature3 session would resolve to `~/.the-brain/agents/feature3/memory/`, never touching Io's.
+## 5. Why per-agent memory dirs make this structural
 
-The master agent's role then becomes **promotion**: read each agent's reflections, decide what belongs in the shared `brain/` vault, commit on main. At no point does one agent's `<current-task>` leak into another's action queue.
+With one shared memory dir, this contract is the only thing standing between an
+unrelated session and another agent's task queue, and it is enforced by a
+prompt: real, but soft.
 
-See [project_multi_agent_worktree_architecture.md](./memory/project_multi_agent_worktree_architecture.md) in auto-memory for the architecture sketch.
+With per-agent memory dirs — `~/.the-brain/agents/<name>/memory/`, resolved by
+`resolveMemoryDir()` in `adapters/claude-code/src/memory-root.ts` — the
+cross-contamination becomes structurally impossible instead. A session running
+in its own directory resolves to its own silo and never writes into another
+agent's. The prompt-level contract stays as defence in depth for the cases
+where several sessions genuinely do share a memory dir.
 
-## 6. Downstream enforcement (not in scope)
+## 6. Deliberately out of scope
 
-This spec addresses the **observation stage**. The `<current-task>` block still lands in MEMORY.md for Io's sessions. Two downstream concerns are deliberately left open:
+This spec covers the **observation stage** only. Two downstream concerns are
+left open on purpose:
 
-1. **Task-action boundary in Io's identity.** Even with correct observations, Io's identity prompt could be strengthened to treat `<current-task>` as *a hint it saw*, not *a command*. E.g., "check with the user before acting on a task that references a directory outside your usual workspace." Tightens the safety gate a level deeper.
-2. **Retrospective cleanup.** Existing MEMORY.md may already contain cross-contaminated `<current-task>` entries from before this fix. `build-context.sh` will overwrite on the next observation cycle, so this resolves naturally. If that cycle doesn't fire soon, manual trim of MEMORY.md is the fix.
+1. **The task-action boundary.** Even with correct observations, an agent's own
+   instructions can treat `<current-task>` as *something it saw* rather than
+   *a command*, for example by requiring a check with the user before acting on
+   a task that references a directory outside its usual workspace. That is a
+   deeper safety gate than this contract, and it belongs to the agent's own
+   configuration, not to the memory layer.
+2. **Retrospective cleanup.** A MEMORY.md written before this contract landed
+   may still hold a cross-contaminated `<current-task>`. `build-context.sh`
+   overwrites the live block on the next observation cycle, so it resolves on
+   its own; if that cycle is not due soon, trimming the block by hand is the
+   fix.
 
 ## 7. Changelog
 
-- **2026-04-17** — v1. Added agent-identity detection via speaker label. Seeded canonical template into `templates/`. Build script copies into both adapter dists. Spec written.
+- **2026-04-17** — v1. Identity detection via speaker label. Canonical template
+  seeded into `templates/`; the build copies it into both adapter bundles.

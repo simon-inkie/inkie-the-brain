@@ -14,10 +14,10 @@ cd "${WORKSPACE:-/workspace}"
 run_step "pnpm install"   pnpm install --frozen-lockfile  || exit $?
 run_step "pnpm build"     pnpm build                      || exit $?
 
-# typecheck has known pre-existing media-filer issues — not a hard fail in v0.
-if ! run_step "pnpm typecheck" pnpm typecheck; then
-  echo "  (typecheck has known pre-existing media-filer issues — not gating)"
-fi
+# Gating. This was non-gating while a known media-filer typing gap was
+# outstanding; that gap is closed and the whole tree typechecks clean, so a
+# failure here is a real regression rather than a known exception.
+run_step "pnpm typecheck" pnpm typecheck || exit $?
 
 echo "  verify dist/ artifacts"
 # The Claude Code adapter is bundled into dist/. The MCP server runs from

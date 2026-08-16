@@ -118,13 +118,13 @@ Provides the `remembering` tool — semantic search over brain + observations + 
 │   └── era-summary.md
 └── MEMORY.md
 
-~/claude-io/designer/             ← future designer agent
+~/agents/designer/                ← a second agent, its own silo
 ├── memory/
 │   ├── observations/
 │   └── …
 └── MEMORY.md
 
-~/claude-io/social/               ← future social-media agent
+~/agents/researcher/              ← a third, likewise
 ├── memory/
 └── MEMORY.md
 ```
@@ -141,7 +141,7 @@ Provides the `remembering` tool — semantic search over brain + observations + 
 
 ## 5. Repo layout
 
-Mirror the io-auto-mode dual-adapter pattern:
+A dual-adapter layout: a platform-agnostic core, one thin adapter per runtime.
 
 ```
 the-brain/
@@ -206,7 +206,7 @@ the-brain/
 
 ### Per-project override: `${cwd}/.the-brain/config.json`
 
-Additive merge over global (same pattern as io-auto-mode). Per-project can tune thresholds for busy vs idle projects.
+Additive merge over the global config. Per-project can tune thresholds for busy vs idle projects.
 
 ### Observer profile presets
 

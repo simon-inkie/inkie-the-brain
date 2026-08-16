@@ -14,7 +14,7 @@ Got Claude Code, Cursor, or another agentic AI? Paste this prompt to it:
 
 > I'd like you to install **the brain** on my machine. It's an open-source memory layer for AI coding agents — gives them long-term memory, observation across sessions, and a shared knowledge vault any agent (Claude Code, Cursor, etc.) can read.
 >
-> Repo: <https://github.com/simon-inkie/the-brain>
+> Repo: <https://github.com/simon-inkie/inkie-the-brain>
 >
 > Please:
 > 1. Clone the repo, read the README, follow `QUICKSTART.md`
@@ -58,8 +58,8 @@ Manual path. See [`QUICKSTART.md`](./QUICKSTART.md) for the 5-minute walkthrough
 docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 # 2. Clone + build
-git clone https://github.com/simon-inkie/the-brain
-cd the-brain
+git clone https://github.com/simon-inkie/inkie-the-brain
+cd inkie-the-brain
 pnpm install
 pnpm build
 
@@ -171,4 +171,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Credits
 
-Built by **Simon Dixon** ([@inkie](https://inkie.ink)) starting April 2026, originally as the memory layer for his autonomous agent **Io**. Open-sourced May 2026 after the design proved out across multiple agents and runtimes.
+Built by [@inkie](https://inkie.ink) starting April 2026, originally as the memory layer for a single autonomous agent. Open-sourced May 2026 after the design proved out across multiple agents and runtimes.

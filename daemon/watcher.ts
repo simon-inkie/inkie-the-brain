@@ -146,8 +146,6 @@ async function handleFileRemove(filePath: string): Promise<void> {
  *
  * Never throws — if Qdrant is unreachable or state files are missing,
  * logs a warning and returns. The watcher still starts.
- *
- * See: brain/decisions/2026-04-11-qdrant-tmpfs-rescue.md
  */
 async function checkQdrantHealth(): Promise<void> {
   interface CheckSpec {

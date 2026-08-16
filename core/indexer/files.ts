@@ -57,8 +57,9 @@ export interface ReconcileOptions {
  *
  * This is a second-line defense against silent data loss — the primary
  * failure mode being Docker Desktop's tmpfs-fallback behavior when a bind
- * mount source is inaccessible at container start time. See
- * brain/decisions/2026-04-11-qdrant-tmpfs-rescue.md for the incident.
+ * mount source is inaccessible at container start time: the container comes
+ * up healthy on an empty tmpfs, every collection is silently gone, and
+ * nothing else in the stack notices.
  *
  * Returns the state, possibly wiped. Pure function modulo the injectable
  * getCount — safe to unit-test.

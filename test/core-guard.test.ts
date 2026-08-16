@@ -9,8 +9,8 @@
  *   hook:  CORE="$(cat)" (STRIPS trailing newlines)    drops CORE on  -lt CAP
  *
  * The guard therefore counted one byte MORE, and that +1 exactly cancelled the
- * `>` against the `-lt`. Every one of the ten live agents agreed - for a reason
- * nobody designed. Any CORE.md saved WITHOUT a trailing newline broke the
+ * `>` against the `-lt`. Every agent measured agreed - for a reason nobody
+ * designed. Any CORE.md saved WITHOUT a trailing newline broke the
  * cancellation: at exactly CAP the hook dropped the entire CORE and the guard
  * stayed green. Silent, and in the check whose only job is to prevent it.
  *
@@ -30,15 +30,16 @@
  * every way of splitting the pair.
  *
  * It deliberately does NOT reimplement the arithmetic - it calls assembledBytes,
- * the same function the guard uses. Three people restated this arithmetic on
- * 2026-07-27 and two got it wrong. A fourth model would not have helped.
+ * the same function the guard uses. A restatement of this arithmetic is easy to
+ * get wrong, and a second wrong copy would only agree with itself.
  *
  * NOTE checkCores takes an OPTIONS OBJECT, not positional args. Calling it as
  * checkCores(agentsDir, home) silently falls back to the real ~/agents and
  * returns a plausible empty result, i.e. the test passes while measuring the
- * live fleet instead of the fixture. Cost me a debugging cycle here.
+ * real agents directory instead of the fixture.
  *
- * ASCII only - no em-dashes (FND-05).
+ * ASCII only in this file, deliberately: it is quoted verbatim in failure
+ * output and a stray multi-byte character muddies a byte-level diff.
  */
 
 import { describe, it, expect } from "vitest";

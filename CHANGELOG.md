@@ -19,9 +19,9 @@ The brain becomes open-source as a single-agent v0. Multi-agent auto-mapping is 
 
 ### Changed
 
-- **`core/indexer/cc-agent-mapping.ts` → `core/indexer/cc-session-discovery.ts`.** The old file hardcoded internal personas (Inkie team) and project-dir → agent mappings. Replaced with a generic single-agent discovery that respects `AGENT_NAME`. Multi-agent auto-mapping deferred to v1.
-- **`scripts/health-check.sh`** — io-auto-mode classifier checks now optional. Skip with a friendly message if not installed; override path with `IO_AUTO_MODE_DIR` env var.
-- **Systemd unit files** (`scripts/the-brain-watcher.service`, `scripts/snapshot-qdrant.service`, `scripts/snapshot-qdrant.timer`) — use `%h` (user-mode home expansion) instead of hardcoded `/home/simon`, so units resolve per-user without edit.
+- **`core/indexer/cc-agent-mapping.ts` → `core/indexer/cc-session-discovery.ts`.** The old file hardcoded a private deployment's personas and its project-dir → agent mappings. Replaced with a generic single-agent discovery that respects `AGENT_NAME`. Multi-agent auto-mapping deferred to v1.
+- **`scripts/health-check.sh`** — checks for an external classifier tool made optional. Skip with a friendly message if it is not installed, rather than failing the whole health check.
+- **Systemd unit files** (`scripts/the-brain-watcher.service`, `scripts/snapshot-qdrant.service`, `scripts/snapshot-qdrant.timer`) — use `%h` (user-mode home expansion) instead of an absolute path under one real home directory, so units resolve per-user without edit.
 - **Test files** — generic `/home/test-user` placeholder paths. 18 pre-existing test failures fixed; suite is now 177/177 passing on a clean clone.
 
 ### Removed
@@ -37,4 +37,4 @@ The brain becomes open-source as a single-agent v0. Multi-agent auto-mapping is 
 
 ## Older history (pre-public)
 
-The project was developed privately under the name `greymatter`, then renamed to `the-brain` 2026-04-19, then re-architected for Claude Code in late April 2026 (the OpenClaw → Claude Code port). The pre-public history is preserved on the private GitLab mirror for the original author's own reference; it included internal personas, agent coordination notes, and other Inkie-team-specific content not relevant to public users.
+The project was developed privately under the name `greymatter`, then renamed to `the-brain` 2026-04-19, then re-architected for Claude Code in late April 2026 (the OpenClaw → Claude Code port). That pre-public history is not part of this repository: it carried personas, agent coordination notes and other deployment-specific material with no meaning outside the private setup it grew in. The public history starts at the first tagged release.
