@@ -398,6 +398,11 @@ const EXEMPTIONS = [
     label: "company-email-address",
     why: "The security-disclosure contact address, the same published address as the package manifest's author field.",
   },
+  {
+    file: "CLAUDE.md",
+    label: "agent-persona-file",
+    why: "A root-level CLAUDE.md is the standard Claude Code project-instructions file, auto-loaded for anyone working in this repository, not a private agent's persona file. The rule stays path-scoped and un-widened deliberately: a nested one (e.g. agents/<name>/CLAUDE.md) is still exactly the leak this rule exists to catch. This exemption covers the repo-root file only, by exact path.",
+  },
 ];
 
 /** @param {string} relativePath @param {string} label */
