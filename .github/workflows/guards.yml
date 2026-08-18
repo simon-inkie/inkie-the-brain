@@ -1,0 +1,45 @@
+# Guards CI: the leak gate and the licence gate, on every PR + push to main.
+#
+# Both scripts already exist (package.json's check:leaks / check:leaks:self-test /
+# check:licence) but nothing ran them in CI, so a leak or a licence-placeholder
+# regression would only surface on manual review. This job is the backstop.
+
+name: guards
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The leak gate's --history/--messages scopes need the full history,
+          # not a shallow checkout.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      # The self-test proves every denylist rule still fires (against
+      # runtime-assembled samples, never committed fixtures) before the
+      # real scan certifies the tree clean.
+      - name: Leak gate self-test
+        run: pnpm check:leaks:self-test
+
+      - name: Leak gate
+        run: pnpm check:leaks
+
+      - name: Licence gate
+        run: pnpm check:licence
