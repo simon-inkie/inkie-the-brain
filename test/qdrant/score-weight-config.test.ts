@@ -1,10 +1,12 @@
 /**
  * What the score-weight env var is allowed to be.
  *
- * `parseFloat` is forgiving in the worst way here: a typo yields NaN, NaN is not
- * nullish so a `?? default` at the use site never engages, and the whole merge
- * sort goes unspecified without an error. Validation belongs at the sink, where
- * the value is born, so no caller has to remember.
+ * A pure typo like "abc" yields NaN and is caught below, but `parseFloat`
+ * parses a leading numeric prefix and silently ignores the rest, so a typo
+ * AFTER a valid number ("0.93oops") would parse as 0.93 with no warning at
+ * all, `Number()` is used instead so the whole trimmed string must be valid.
+ * Validation belongs at the sink, where the value is born, so no caller has
+ * to remember.
  *
  * Zero and negatives are rejected rather than clamped: 0 silently MUTES a
  * collection and a negative INVERTS its ranking. Neither is a plausible intent
@@ -52,6 +54,7 @@ describe("a bad score weight falls back to the default instead of poisoning the 
     ["a mute", "0"],
     ["an inversion", "-1"],
     ["an empty string", ""],
+    ["a valid prefix with trailing garbage", "0.93oops"],
   ])("rejects %s and warns", async (_label, value) => {
     const { weight, warnings } = await weightFor(value);
     expect(weight).toBe(DEFAULT);

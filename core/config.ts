@@ -171,7 +171,11 @@ const DEFAULT_MESSAGES_SCORE_WEIGHT = 0.93;
  */
 function parseScoreWeight(raw: string | undefined, fallback: number, envName: string): number {
   if (raw === undefined || raw.trim() === "") return fallback;
-  const value = parseFloat(raw);
+  // Number(), not parseFloat(): parseFloat parses a leading numeric prefix
+  // and silently ignores trailing garbage ("0.93oops" -> 0.93), which would
+  // let malformed input through despite the reject-invalid-input contract
+  // below. Number() requires the whole trimmed string to be a valid number.
+  const value = Number(raw.trim());
   if (!Number.isFinite(value) || value <= 0) {
     console.error(
       `[config] ignoring ${envName}="${raw}" — expected a finite number greater than 0; ` +
