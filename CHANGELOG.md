@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning loosely follows [SemVer](https://semver.org/) — pre-1.0 is best-effort and breaking changes can land in any minor.
 
+## [Unreleased]
+
+### Fixed
+
+- **The background indexer could silently fail to start after a context compaction.** The `PreCompact` hook opens a diagnostic log for the indexer's stdout and stderr, and that setup shared a try block with the spawn itself, so anything that stopped the log being created or opened (a permissions or ownership change on `~/.the-brain/logs`, ENOSPC, fd exhaustion, an ordinary file sitting where the directory should be) landed in the spawn's catch and the indexer was never started at all. Observability had quietly become a hard prerequisite for the work it was meant to observe. The two are now independent: a log that cannot be opened falls back to discarding the child's output, and the spawn goes ahead regardless. Spawn attempts, spawn errors and child exits are recorded in `hook-activity.jsonl` under one trace id, and the hook now waits briefly on the event loop after spawning so a failure such as `node` not resolving on `PATH` is logged before the hook process exits rather than lost to the race. The log descriptor is closed in a `finally`, so repeated compactions cannot leak one.
+
 ## [0.3.0] — 2026-08
 
 Three months of work on the private side, brought across and re-scrubbed. The headline changes are the shape of the observation loop, a third adapter, and cost becoming a first-class control. Every documented command in `README.md` and `QUICKSTART.md` was run against this tree and its output matched to the doc.

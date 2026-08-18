@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdirSync,
+  mkdtempSync,
   writeFileSync,
   readFileSync,
   rmSync,
   existsSync,
   chmodSync,
+  statSync,
 } from "fs";
-import { join } from "path";
+import { spawn } from "child_process";
+import { join, dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { tmpdir } from "os";
 import { run } from "../../adapters/claude-code/src/on-pre-compact.js";
 import { sessionKeyFor } from "../../adapters/claude-code/src/observe-trigger.js";
@@ -192,5 +196,219 @@ describe("on-pre-compact — force-fire semantics", () => {
     const result = await run("not-json{{{");
     expect(result.fired).toBe(false);
     expect(result.reason).toMatch(/malformed/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Background-indexer spawn branch.
+//
+// The suite above only exercises the exported `run()` (observation semantics)
+// and never enters `main()`, where the hook spawns `index-messages` for the
+// compacting agent. That branch is what these cover, and specifically the
+// fail-closed regression review caught: the diagnostic-log setup (`mkdirSync`
+// + `openSync` on ~/.the-brain/logs) shared a try block with the spawn, so any
+// failure to create or open that log skipped the indexing entirely. Before the
+// logging was added, stdio was an unconditional "ignore" and the spawn always
+// fired — observability had quietly become a hard prerequisite for the thing
+// it observes.
+//
+// These run the hook as a REAL child process rather than mocking node:fs. The
+// failure is injected the way it actually presents on a live box (an ordinary
+// file sitting where ~/.the-brain/logs should be a directory), and the
+// assertions are on what a live box would see: the indexer process started,
+// `{"suppressOutput":true}` on stdout, exit 0. Mocking `openSync` would have
+// proven the same thing about a stubbed filesystem only, and the hook's
+// stdout/exit contract — the half that keeps compaction unblocked — cannot be
+// observed from inside the module at all.
+//
+// HOME is redirected at a temp dir for both, so nothing here can reach the
+// real ~/.the-brain, and the indexer is never actually run: one case shims
+// `node` on PATH so it only records its argv, the other empties PATH so the
+// spawn cannot resolve `node` at all.
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const HOOK_ENTRY = join(
+  REPO_ROOT,
+  "adapters",
+  "claude-code",
+  "src",
+  "on-pre-compact.ts",
+);
+const SPAWN_TEST_AGENT = "precompact-spawn-test";
+
+interface HookRun {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run the hook end to end as its own process, feeding `payload` on stdin. */
+function runHookProcess(
+  env: NodeJS.ProcessEnv,
+  payload: string,
+): Promise<HookRun> {
+  return new Promise((res, rej) => {
+    const child = spawn(process.execPath, ["--import", "tsx/esm", HOOK_ENTRY], {
+      cwd: REPO_ROOT,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("error", rej);
+    child.on("close", (code) => res({ code, stdout, stderr }));
+    child.stdin.end(payload);
+  });
+}
+
+/** The indexer is detached, so it can land just after the hook exits. */
+async function waitForFile(path: string, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
+}
+
+describe("on-pre-compact — background indexer spawn", () => {
+  let fakeHome: string;
+  let transcriptPath: string;
+  let logsDir: string;
+
+  beforeEach(() => {
+    fakeHome = mkdtempSync(join(tmpdir(), "tb-precompact-spawn-"));
+    logsDir = join(fakeHome, ".the-brain", "logs");
+    transcriptPath = join(fakeHome, "transcript.jsonl");
+    // Empty transcript: the observation half returns "no unobserved content"
+    // and spawns nothing, leaving the indexer branch as the only spawn.
+    writeFileSync(transcriptPath, "");
+  });
+
+  afterEach(() => {
+    rmSync(fakeHome, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  });
+
+  /**
+   * Child env built from scratch rather than inherited: AGENT_NAME, HOME,
+   * BRAIN_MEMORY_DIR and BRAIN_ROOT can all be live in the surrounding shell
+   * and every one of them would pull the hook back out of the sandbox.
+   * BRAIN_ROOT in particular is deleted so `resolveBrainRoot()` falls through
+   * to its walk-up from the module's own location, which lands on this
+   * checkout — the same resolution a real install performs.
+   */
+  function hookEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env.BRAIN_DEBUG;
+    delete env.BRAIN_MEMORY_DIR;
+    delete env.BRAIN_ROOT;
+    // Default is "info"; a level set in the surrounding shell would filter
+    // out the spawn-attempt line the second case asserts on.
+    delete env.BRAIN_LOG_LEVEL;
+    return {
+      ...env,
+      HOME: fakeHome,
+      AGENT_NAME: SPAWN_TEST_AGENT,
+      // No observe.sh here, so the observation half cannot fire either.
+      BRAIN_TOOLS_DIR: join(fakeHome, "no-tools"),
+      ...extra,
+    };
+  }
+
+  function payload(): string {
+    return JSON.stringify({
+      session_id: "precompact-spawn-session",
+      transcript_path: transcriptPath,
+      cwd: fakeHome,
+      hook_event_name: "PreCompact",
+      trigger: "auto",
+    });
+  }
+
+  /** A `node` on PATH that records its argv instead of running the indexer. */
+  function installNodeShim(): string {
+    const shimDir = join(fakeHome, "shim-bin");
+    mkdirSync(shimDir, { recursive: true });
+    const shim = join(shimDir, "node");
+    writeFileSync(
+      shim,
+      `#!/bin/bash\nprintf '%s\\n' "$*" >> "$PRECOMPACT_SPAWN_MARKER"\n`,
+    );
+    chmodSync(shim, 0o755);
+    return shimDir;
+  }
+
+  it("still spawns the indexer when the diagnostic log cannot be opened", async () => {
+    // An ordinary FILE where ~/.the-brain/logs should be a directory: both
+    // mkdirSync (EEXIST) and openSync fail, exactly as they would on a
+    // permissions or ownership drift, or on ENOSPC / fd exhaustion.
+    mkdirSync(join(fakeHome, ".the-brain"), { recursive: true });
+    writeFileSync(logsDir, "not a directory\n");
+
+    const marker = join(fakeHome, "indexer-spawned.txt");
+    const shimDir = installNodeShim();
+
+    const result = await runHookProcess(
+      hookEnv({
+        PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+        PRECOMPACT_SPAWN_MARKER: marker,
+      }),
+      payload(),
+    );
+
+    // Positive control: the injected failure really happened. If mkdirSync
+    // had somehow succeeded, `logs` would now be a directory and this test
+    // would be asserting the happy path under a misleading name.
+    expect(statSync(logsDir).isFile()).toBe(true);
+
+    // The regression: with the log setup inside the spawn's try block, the
+    // catch swallowed EEXIST and the indexer was never started.
+    expect(await waitForFile(marker)).toBe(true);
+    expect(readFileSync(marker, "utf-8")).toContain(
+      `index-messages --agent ${SPAWN_TEST_AGENT}`,
+    );
+
+    // And compaction stays unblocked regardless.
+    expect(result.stdout.trim()).toBe('{"suppressOutput":true}');
+    expect(result.code).toBe(0);
+  });
+
+  it("records a failed indexer spawn in the activity log", async () => {
+    // Log setup succeeds here, so the fd path is the one under test.
+    mkdirSync(logsDir, { recursive: true });
+    // PATH holds one empty directory, so `node` resolves nowhere and the
+    // spawn fails ENOENT asynchronously — the case the 150ms window after
+    // unref() exists to catch. Without it the process exits first and the
+    // failure is never recorded.
+    const emptyBin = join(fakeHome, "empty-bin");
+    mkdirSync(emptyBin, { recursive: true });
+
+    const result = await runHookProcess(
+      hookEnv({ PATH: emptyBin }),
+      payload(),
+    );
+
+    const activity = readFileSync(
+      join(logsDir, "hook-activity.jsonl"),
+      "utf-8",
+    );
+    expect(activity).toContain("index-messages-spawn-attempt");
+    expect(activity).toContain("index-messages-spawn-error");
+    // The child's stdout/stderr fd was obtained and used, not the "ignore"
+    // fallback — openSync(…, "a") creates the file.
+    expect(existsSync(join(logsDir, "precompact-index-messages.log"))).toBe(
+      true,
+    );
+
+    expect(result.stdout.trim()).toBe('{"suppressOutput":true}');
+    expect(result.code).toBe(0);
   });
 });

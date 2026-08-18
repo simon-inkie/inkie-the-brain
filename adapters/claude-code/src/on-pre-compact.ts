@@ -10,7 +10,13 @@
  * Fail-open: any error → no observation + exit 0. Never blocks compaction.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  openSync,
+  mkdirSync,
+  closeSync,
+} from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -45,6 +51,7 @@ import {
   type HookInput,
   type TriggerResult,
 } from "./observe-trigger.js";
+import { log, makeTraceId } from "../../../core/log.js";
 
 export async function run(rawInput: string): Promise<TriggerResult> {
   let input: HookInput;
@@ -125,24 +132,116 @@ async function main(): Promise<void> {
   // compaction.
   const agentName = process.env.AGENT_NAME;
   if (agentName) {
-    try {
-      const brainRoot = resolveBrainRoot();
-      if (!brainRoot) {
-        emit();
-      }
-      const child = spawn(
-        "node",
-        ["--import", "tsx/esm", "cli/index.ts", "index-messages", "--agent", agentName],
-        {
-          cwd: brainRoot,
-          detached: true,
-          stdio: "ignore",
-          env: { ...process.env },
-        },
+    const traceId = makeTraceId(agentName);
+    const brainRoot = resolveBrainRoot();
+    if (!brainRoot) {
+      log(
+        "warn",
+        "on-pre-compact",
+        "index-messages-no-brain-root",
+        { data: { agentName } },
+        traceId,
       );
-      child.unref();
-    } catch {
-      // fail-open
+    } else {
+      // Diagnostic-log setup gets its OWN try, ahead of the spawn's. The log
+      // is observability; the spawn is the actual work. When these shared one
+      // try block, any failure to create or open the log directory
+      // (permissions, ENOSPC, fd exhaustion, an ordinary file where the
+      // directory should be, ownership drift) landed in the spawn's catch and
+      // the indexer was never started at all — making observability a hard
+      // prerequisite for the thing it observes, where before it was
+      // `stdio: "ignore"` and the spawn always fired. On failure we fall back
+      // to that same "ignore" and spawn regardless.
+      let childLogFd: number | undefined;
+      try {
+        const logDir = join(homedir(), ".the-brain", "logs");
+        mkdirSync(logDir, { recursive: true });
+        childLogFd = openSync(
+          join(logDir, "precompact-index-messages.log"),
+          "a",
+        );
+      } catch (err) {
+        childLogFd = undefined;
+        // Best-effort: log() is itself fail-soft, and whether this lands has
+        // no bearing on the spawn below.
+        log(
+          "warn",
+          "on-pre-compact",
+          "index-messages-log-setup-failed",
+          { data: { agentName, message: (err as Error).message } },
+          traceId,
+        );
+      }
+
+      try {
+        log(
+          "info",
+          "on-pre-compact",
+          "index-messages-spawn-attempt",
+          { data: { agentName, brainRoot, childLog: childLogFd !== undefined } },
+          traceId,
+        );
+        const child = spawn(
+          "node",
+          ["--import", "tsx/esm", "cli/index.ts", "index-messages", "--agent", agentName],
+          {
+            cwd: brainRoot,
+            detached: true,
+            stdio:
+              childLogFd === undefined
+                ? "ignore"
+                : ["ignore", childLogFd, childLogFd],
+            env: { ...process.env },
+          },
+        );
+        child.on("error", (err) => {
+          log(
+            "error",
+            "on-pre-compact",
+            "index-messages-spawn-error",
+            { data: { agentName, message: err.message } },
+            traceId,
+          );
+        });
+        child.on("exit", (code, signal) => {
+          log(
+            "info",
+            "on-pre-compact",
+            "index-messages-spawn-exit",
+            { data: { agentName, code, signal } },
+            traceId,
+          );
+        });
+        child.unref();
+        // Give the event loop a short window so a synchronous-ish spawn
+        // failure (e.g. ENOENT resolving "node") can emit 'error' and get
+        // logged before this process exits. Without this, the process.exit()
+        // in emit() tears down the event loop before the async 'error' event
+        // ever fires, so a failed spawn was previously indistinguishable from
+        // a successful one — this closes that race.
+        await new Promise((r) => setTimeout(r, 150));
+      } catch (err) {
+        log(
+          "error",
+          "on-pre-compact",
+          "index-messages-spawn-throw",
+          { data: { agentName, message: (err as Error).message } },
+          traceId,
+        );
+      } finally {
+        // A numeric fd handed to `stdio` is duplicated into the child at spawn
+        // time, so once spawn() has returned the child owns its own descriptor
+        // and this one is just our copy. Close it either way: if spawn threw,
+        // the child never existed and leaving it open is a straight leak; if
+        // it succeeded, our copy has done its job.
+        if (childLogFd !== undefined) {
+          try {
+            closeSync(childLogFd);
+          } catch {
+            /* already gone */
+          }
+        }
+      }
     }
   }
 
