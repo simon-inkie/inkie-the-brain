@@ -2,8 +2,14 @@ node_modules/
 dist/
 *.tsbuildinfo
 .debugging/
+# Environment + credential material. Broad by design: `.env` and `.env.local`
+# alone left `.env.production`, `.env.staging` and friends committable. No .env
+# file is tracked in this repo, so the wildcard cannot untrack anything; the
+# `!.env.example` negation keeps a documented template possible in future.
 .env
-.env.local
+.env.*
+!.env.example
+*.age
 .DS_Store
 *.log
 
