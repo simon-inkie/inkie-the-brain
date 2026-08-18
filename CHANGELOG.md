@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning loosely follows [SemVer](https://semver.org/) — pre-1.0 is best-effort and breaking changes can land in any minor.
 
+## [Unreleased]
+
+### Added
+
+- **Per-collection score weights in ranked search** (`config.searchDefaults.collectionWeights`, applied in `core/qdrant/client.ts`). A noisier collection can be downweighted so it does not dominate the merged result list. The messages collection defaults to `0.93` and every other collection is implicitly `1.0`; `BRAIN_MESSAGES_SCORE_WEIGHT` overrides the default. Qdrant's `score_threshold` still runs server-side against the unweighted score, so a weight changes only the order of results, never which results are considered relevant. Search results now carry `rawScore` alongside `score` so the pre-weight value stays visible for diagnostics. A weight that is not a finite number greater than 0 is rejected with a warning and the default applies, because a NaN weight would otherwise reach the comparator and make the whole ranking unspecified.
+
 ## [0.3.0] — 2026-08
 
 Three months of work on the private side, brought across and re-scrubbed. The headline changes are the shape of the observation loop, a third adapter, and cost becoming a first-class control. Every documented command in `README.md` and `QUICKSTART.md` was run against this tree and its output matched to the doc.

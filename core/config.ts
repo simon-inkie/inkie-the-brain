@@ -144,6 +144,44 @@ const stateDir = process.env.BRAIN_STATE_DIR
 // Final config
 // ---------------------------------------------------------------------------
 
+// Hoisted so BOTH `collections.messages` and the score-weight map below key off
+// the SAME resolved name. Inlining the env read twice would silently unweight
+// the collection whenever BRAIN_MESSAGES_COLLECTION is overridden (the
+// blue-green rebuild), which is exactly the kind of divergence that only shows
+// up later as a ranking regression nobody can reproduce.
+const messagesCollection = process.env.BRAIN_MESSAGES_COLLECTION ?? "io-messages";
+
+/** Default multiplier for the io-messages chatter layer. See collectionWeights. */
+const DEFAULT_MESSAGES_SCORE_WEIGHT = 0.93;
+
+/**
+ * Parse a per-collection score multiplier, rejecting anything that would poison
+ * the merge sort.
+ *
+ * `parseFloat("abc")` is NaN, and NaN is NOT nullish — so a `?? 1.0` fallback at
+ * the use site never engages, every result in that collection scores NaN, and
+ * the comparator's answers become unspecified. The whole ranking silently turns
+ * to garbage on a typo in an env var. Validate at the SINK, where the value is
+ * born, so no caller has to remember.
+ *
+ * Zero and negatives are rejected too, not clamped: 0 silently MUTES a
+ * collection and a negative INVERTS its ranking. Neither is a plausible intent
+ * for a tuning knob, and muting a collection deserves an explicit mechanism
+ * rather than a magic weight.
+ */
+function parseScoreWeight(raw: string | undefined, fallback: number, envName: string): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = parseFloat(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    console.error(
+      `[config] ignoring ${envName}="${raw}" — expected a finite number greater than 0; ` +
+        `using the default ${fallback}`,
+    );
+    return fallback;
+  }
+  return value;
+}
+
 export const config = {
   // QDRANT_URL env override — defaults to local Docker Qdrant on 6333.
   // Documented in QUICKSTART for Qdrant Cloud users (Path C escape hatch)
@@ -161,7 +199,7 @@ export const config = {
     // Env-overridable so a blue-green re-index can build into a fresh
     // collection (BRAIN_MESSAGES_COLLECTION=io-messages-v2) and then alias
     // io-messages -> io-messages-v2 once it verifies. Default unchanged.
-    messages: process.env.BRAIN_MESSAGES_COLLECTION ?? "io-messages",
+    messages: messagesCollection,
     assets: "io-assets",
   },
 
@@ -186,6 +224,27 @@ export const config = {
   searchDefaults: {
     limit: 10,
     scoreThreshold: 0.3,
+    // Per-collection score multipliers, applied at the ONE merge point in
+    // search() (qdrant/client.ts). Unlisted collections are implicitly x1.0.
+    //
+    // Why: io-messages is the CHATTER layer. It holds every agent's own
+    // paraphrase of a decision, several times over, from the same session that
+    // made it, and those echoes score marginally higher against a query than
+    // the terse original they restate — so the canonical note ranks below its
+    // own echoes. A small, NAMED downweight of the chatter layer corrects that.
+    // Nothing is boosted in compensation, deliberately, so this stays a
+    // de-noise rather than a ranking arms race.
+    //
+    // The score_threshold stays applied server-side on the RAW score, so the
+    // floor remains a similarity floor and the weight only reorders the merge.
+    // Weighting changes which results rank first, never which results exist.
+    collectionWeights: {
+      [messagesCollection]: parseScoreWeight(
+        process.env.BRAIN_MESSAGES_SCORE_WEIGHT,
+        DEFAULT_MESSAGES_SCORE_WEIGHT,
+        "BRAIN_MESSAGES_SCORE_WEIGHT",
+      ),
+    } as Record<string, number>,
   },
 
   indexStatePath: join(stateDir, "io-memory-index-state.json"),
