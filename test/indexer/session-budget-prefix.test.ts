@@ -27,6 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, statSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { atomicStateFsMock } from "./atomic-state-fs-mock.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -213,18 +214,23 @@ async function makeHarness(opts: {
     }),
   }));
 
-  // The state file is MUTABLE across ticks — saveState's writeFile feeds the
-  // next tick's loadState. That is the cross-tick seam these tests exercise.
+  // The state file is MUTABLE across ticks — saveState feeds the next tick's
+  // loadState. That is the cross-tick seam these tests exercise.
   let stateJson = JSON.stringify(opts.initialState ?? EMPTY_STATE);
 
+  // saveState persists atomically: state becomes visible on the RENAME, not on
+  // the writeFile, and a direct write to STATE_FILE is rejected.
+  const stateFs = atomicStateFsMock(STATE_FILE, (data) => {
+    stateJson = data;
+  });
   vi.doMock("fs/promises", () => ({
     readFile: vi.fn(async (path: string) => {
       if (path === STATE_FILE) return stateJson;
       throw new Error(`unexpected readFile: ${path}`);
     }),
-    writeFile: vi.fn(async (path: string, data: string) => {
-      if (path === STATE_FILE) stateJson = data;
-    }),
+    writeFile: stateFs.writeFile,
+    rename: stateFs.rename,
+    unlink: stateFs.unlink,
     // Real stat of the real fixture. Size + mtime stay CONSTANT for a given
     // session across ticks because nothing rewrites the file: these are cold
     // sessions, exactly the case an unchanged-file early-skip would freeze
