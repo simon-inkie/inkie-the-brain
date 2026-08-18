@@ -9,9 +9,9 @@
  * JSON file on disk. The next tick's `loadState()` does `JSON.parse` inside a
  * `try { } catch { return empty }`, so the corruption is SILENT: the indexer
  * does not error, it just decides it has never indexed anything and the resume
- * checkpoint is gone. State corruption of that shape has already killed
- * semantic recall workspace-wide once, and it took days to spot precisely
- * because nothing failed loudly.
+ * checkpoint is gone. State corruption of that shape is dangerous precisely
+ * because nothing fails loudly: it can sit unnoticed for a long time before
+ * anyone realises the index has silently stopped growing.
  *
  * The fix is the standard POSIX write-then-rename dance:
  *
