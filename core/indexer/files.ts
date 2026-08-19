@@ -1,11 +1,12 @@
-import { readFile, writeFile, access, readdir, stat, mkdir } from "fs/promises";
-import { join, relative, basename, dirname } from "path";
+import { readFile, access, readdir, stat } from "fs/promises";
+import { join, relative, basename } from "path";
 import { createHash } from "crypto";
 import { glob } from "glob";
 import matter from "gray-matter";
 import { config } from "../config.js";
 import { embedTexts } from "../embedder/text.js";
 import { detectCollection, agentNameFromPath } from "./collection-router.js";
+import { writeFileAtomic } from "./atomic-state.js";
 import {
   ensureCollections,
   upsertPoints,
@@ -120,9 +121,16 @@ async function loadState(): Promise<IndexState> {
   }
 }
 
+/**
+ * Persist index state crash-safely: write-then-rename, never a plain overwrite.
+ * A torn write here is silent — loadState() swallows the parse error and
+ * reports "nothing indexed", wiping the cross-tick resume checkpoint.
+ *
+ * writeFileAtomic creates the state directory recursively as part of the write,
+ * so a fresh install whose state directory does not exist yet still works.
+ */
 async function saveState(state: IndexState): Promise<void> {
-  await mkdir(dirname(config.indexStatePath), { recursive: true });
-  await writeFile(config.indexStatePath, JSON.stringify(state, null, 2));
+  await writeFileAtomic(config.indexStatePath, JSON.stringify(state, null, 2));
 }
 
 function contentHash(content: string): string {

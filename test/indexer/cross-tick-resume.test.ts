@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { atomicStateFsMock } from "./atomic-state-fs-mock.js";
 
 // ---------------------------------------------------------------------------
 // Shared config stub - mirrors the real config shape for the fields indexAll uses
@@ -144,29 +145,33 @@ describe("indexAll - cross-tick resume", () => {
       };
     });
 
-    // fs/promises: the state file content is MUTABLE - saveState's writeFile
-    // updates it so the SECOND indexAll()'s loadState() reads back the partial
-    // state persisted by the first (cap-halted) run. This is the cross-tick seam.
+    // fs/promises: the state file content is MUTABLE - saveState publishes it so
+    // the SECOND indexAll()'s loadState() reads back the partial state persisted
+    // by the first (cap-halted) run. This is the cross-tick seam.
+    //
+    // saveState writes atomically, so the state file becomes visible on the
+    // RENAME, not on the writeFile - the shared mock models that. It also
+    // rejects a direct write to the state path, so a regression to a plain
+    // overwrite fails here rather than silently passing.
     let stateFileContent = JSON.stringify({
       files: {},
       lastFullIndex: PRIOR_LAST_FULL_INDEX,
     });
     const stateWrites: string[] = [];
+    const stateFs = atomicStateFsMock(FAKE_STATE_PATH, (data) => {
+      stateFileContent = data; // persist for the next tick's loadState
+      stateWrites.push(data);
+    });
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path === FAKE_STATE_PATH) return stateFileContent;
         return FILE_CONTENT[path] ?? "# Unknown\n\nfallback content.";
       }),
-      writeFile: vi.fn().mockImplementation(
-        async (path: string, data: string) => {
-          if (path === FAKE_STATE_PATH) {
-            stateFileContent = data; // persist for the next tick's loadState
-            stateWrites.push(data);
-          }
-        }
-      ),
+      writeFile: stateFs.writeFile,
+      rename: stateFs.rename,
+      unlink: stateFs.unlink,
       // MEMORY.md does not exist → indexMemoryMd skips it. This isolates the
       // resume-tick embed assertion to the two brain files (otherwise MEMORY.md,
       // never reached on tick 1's cap-halt, would also embed fresh on tick 2 and
@@ -237,6 +242,10 @@ describe("indexAll - cross-tick resume", () => {
     expect(tick2State.files[FILE_2_KEY]).toBeDefined();
     expect(typeof tick2State.lastFullIndex).toBe("string");
     expect(tick2State.lastFullIndex).not.toBe(PRIOR_LAST_FULL_INDEX);
+
+    // Neither the cap-halted tick nor the clean tick may leave a temp state
+    // file behind.
+    expect(stateFs.leftovers()).toEqual([]);
   });
 
   // -------------------------------------------------------------------------
@@ -272,9 +281,14 @@ describe("indexAll - cross-tick resume", () => {
       flushTelemetry: vi.fn().mockResolvedValue(undefined),
     }));
 
-    const writeFileCalls: Array<{ path: string; data: string }> = [];
+    // State reaches the target via rename - the shared mock publishes on rename
+    // and rejects any direct write to the state path.
+    const statePublishes: string[] = [];
+    const stateFs = atomicStateFsMock(FAKE_STATE_PATH, (data) => {
+      statePublishes.push(data);
+    });
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path === FAKE_STATE_PATH) {
@@ -282,11 +296,9 @@ describe("indexAll - cross-tick resume", () => {
         }
         return FILE_CONTENT[path] ?? "# Unknown\n\nfallback content.";
       }),
-      writeFile: vi.fn().mockImplementation(
-        async (path: string, data: string) => {
-          writeFileCalls.push({ path, data });
-        }
-      ),
+      writeFile: stateFs.writeFile,
+      rename: stateFs.rename,
+      unlink: stateFs.unlink,
       access: vi.fn().mockResolvedValue(undefined),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
@@ -299,13 +311,13 @@ describe("indexAll - cross-tick resume", () => {
 
     // --- Assert ---
 
-    const stateSave = writeFileCalls.find((c) => c.path === FAKE_STATE_PATH);
+    const stateSave = statePublishes[statePublishes.length - 1];
     expect(
       stateSave,
       "saveState must be called on a clean pass"
     ).toBeDefined();
 
-    const savedState = JSON.parse(stateSave!.data);
+    const savedState = JSON.parse(stateSave);
 
     // lastFullIndex must be an ISO timestamp on a clean pass
     expect(
@@ -316,5 +328,8 @@ describe("indexAll - cross-tick resume", () => {
 
     // Quick sanity: the indexed file is in state
     expect(Object.keys(savedState.files).length).toBeGreaterThan(0);
+
+    // A clean pass leaves no temp state file behind.
+    expect(stateFs.leftovers()).toEqual([]);
   });
 });
