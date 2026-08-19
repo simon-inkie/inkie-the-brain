@@ -374,11 +374,6 @@ const RULES = [
  */
 const EXEMPTIONS = [
   {
-    file: "LICENSE",
-    label: "principal-first-name",
-    why: "The copyright holder's real name is what makes the licence grant enforceable. A licence naming nobody grants nothing.",
-  },
-  {
     file: "package.json",
     label: "principal-first-name",
     why: "The package manifest's author field. Attribution metadata, published on purpose.",
