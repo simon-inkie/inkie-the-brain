@@ -16,10 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The leak gate's --history/--messages scopes need the full history,
-          # not a shallow checkout.
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
