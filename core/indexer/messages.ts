@@ -1,13 +1,14 @@
-import { readFile, writeFile, readdir, stat, mkdir } from "fs/promises";
+import { readFile, readdir, stat } from "fs/promises";
 import { createReadStream } from "fs";
 import { createInterface } from "readline";
-import { join, basename, dirname } from "path";
+import { join, basename } from "path";
 import { createHash } from "crypto";
 import { config } from "../config.js";
 import { embedTexts, resetTickCounter, flushTelemetry } from "../embedder/text.js";
 import { isDryRun, remainingTickBudget, MAX_EMBEDS_PER_TICK } from "../embedder/gate.js";
 import { ensureCollections, client, getCollectionPointCount } from "../qdrant/client.js";
 import { discoverCCSessions, type DiscoveredSession } from "./cc-session-discovery.js";
+import { writeFileAtomic } from "./atomic-state.js";
 
 // --- Types ---
 
@@ -164,9 +165,16 @@ async function loadState(): Promise<MessageIndexState> {
   }
 }
 
+/**
+ * Persist message-index state crash-safely: write-then-rename, never a plain
+ * overwrite. This state carries the per-session `lastPairIndex` checkpoints, so
+ * a torn write silently re-embeds every session from scratch.
+ *
+ * writeFileAtomic creates the state directory recursively as part of the write,
+ * so a fresh install whose state directory does not exist yet still works.
+ */
 async function saveState(state: MessageIndexState): Promise<void> {
-  await mkdir(dirname(config.messageIndexing.stateFile), { recursive: true });
-  await writeFile(
+  await writeFileAtomic(
     config.messageIndexing.stateFile,
     JSON.stringify(state, null, 2)
   );

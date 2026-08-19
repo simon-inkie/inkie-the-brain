@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from "fs";
 // Real config, bound once at top level — immune to the per-test vi.doMock("config")
 // partial mocks used elsewhere in this file.
 import { config as realConfig } from "../../core/config.js";
+import { atomicStateFsStub } from "./atomic-state-fs-mock.js";
 
 // ---------------------------------------------------------------------------
 // Helpers shared across suites
@@ -461,7 +462,7 @@ describe("tri-guard — state transition assertions", () => {
 
     const emptyState = JSON.stringify({ sessions: {}, ccSessions: {}, lastRun: "", totalMessagesIndexed: 0 });
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return emptyState;
@@ -469,7 +470,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
+      ...atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length,
@@ -559,7 +560,7 @@ describe("tri-guard — state transition assertions", () => {
     }));
 
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return JSON.stringify(existingState);
@@ -567,7 +568,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
+      ...atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length + 1, // size changed
@@ -644,7 +645,7 @@ describe("tri-guard — state transition assertions", () => {
     }));
 
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return JSON.stringify(existingState);
@@ -652,7 +653,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
+      ...atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length + 10,
@@ -731,7 +732,7 @@ describe("tri-guard — state transition assertions", () => {
     }));
 
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return JSON.stringify(existingState);
@@ -739,7 +740,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
+      ...atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length, // larger than the 50 in state
@@ -821,7 +822,7 @@ describe("tri-guard — state transition assertions", () => {
     }));
 
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return JSON.stringify(existingState);
@@ -829,7 +830,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
+      ...atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length, // bigger than state's 10
@@ -890,9 +891,19 @@ describe("tri-guard — state transition assertions", () => {
     }));
 
     const emptyStateDry = JSON.stringify({ sessions: {}, ccSessions: {}, lastRun: "", totalMessagesIndexed: 0 });
-    const writeFileMock = vi.fn().mockResolvedValue(undefined);
+    // State is persisted atomically: it lands on the target via rename, so
+    // "was the state written" is "did a rename publish it".
+    let statePublished = false;
+    const stateFs = atomicStateFsStub(CONFIG_STUB.messageIndexing.stateFile);
+    const publishTracking = {
+      ...stateFs,
+      rename: vi.fn(async (from: string, to: string) => {
+        await stateFs.rename(from, to);
+        if (to === CONFIG_STUB.messageIndexing.stateFile) statePublished = true;
+      }),
+    };
     vi.doMock("fs/promises", () => ({
-      // saveState ensures the state dir exists before writing.
+      // writeFileAtomic ensures the state dir exists before writing.
       mkdir: vi.fn().mockResolvedValue(undefined),
       readFile: vi.fn().mockImplementation(async (path: string) => {
         if (path.includes("state")) return emptyStateDry;
@@ -900,7 +911,7 @@ describe("tri-guard — state transition assertions", () => {
         // that blows V8's string ceiling on a large session.
         throw new Error(`unexpected readFile of a transcript: ${path}`);
       }),
-      writeFile: writeFileMock,
+      ...publishTracking,
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({
         size: jsonl.length,
@@ -931,8 +942,9 @@ describe("tri-guard — state transition assertions", () => {
     expect(mockUpsert).not.toHaveBeenCalled();
     expect(mockDelete).not.toHaveBeenCalled();
 
-    // State file should still be written
-    expect(writeFileMock).toHaveBeenCalled();
+    // State file should still be written — and published by rename, not by a
+    // plain overwrite of the live file.
+    expect(statePublished).toBe(true);
   });
 });
 

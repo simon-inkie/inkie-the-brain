@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat, mkdir } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { join, relative, basename, extname, dirname } from "path";
 import { createHash } from "crypto";
 import { glob } from "glob";
@@ -6,6 +6,7 @@ import { imageSize } from "image-size";
 import { config } from "../config.js";
 import { embedText } from "../embedder/text.js";
 import { agentNameFromPath } from "./collection-router.js";
+import { writeFileAtomic } from "./atomic-state.js";
 import {
   ensureCollections,
   upsertPoints,
@@ -54,9 +55,17 @@ async function loadState(): Promise<AssetIndexState> {
   }
 }
 
+/**
+ * Persist asset-index state crash-safely: write-then-rename, never a plain
+ * overwrite. This state file is the most exposed of the three — the watcher can
+ * have `indexAssetFile` (per-file debounce timer) and `deleteAsset` (a floating
+ * promise off the `unlink` event) writing it concurrently.
+ *
+ * writeFileAtomic creates the state directory recursively as part of the write,
+ * so a fresh install whose state directory does not exist yet still works.
+ */
 async function saveState(state: AssetIndexState): Promise<void> {
-  await mkdir(dirname(config.assetIndexing.stateFile), { recursive: true });
-  await writeFile(
+  await writeFileAtomic(
     config.assetIndexing.stateFile,
     JSON.stringify(state, null, 2)
   );
