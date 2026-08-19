@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning loosely follows [SemVer](https://semver.org/) — pre-1.0 is best-effort and breaking changes can land in any minor.
 
+## [Unreleased]
+
+### Fixed
+
+- **Indexer state files were not written crash-safely.** All three indexers persisted their resume checkpoint with a plain `writeFile` overwrite, which truncates the live file and then streams the new bytes in. A crash, SIGKILL, OOM kill or power cut between those two steps leaves truncated JSON on disk, and because `loadState()` parses inside a `try { } catch { return empty }` the corruption is silent: the indexer reports no error, decides it has never indexed anything, and the resume checkpoint is gone. A new `core/indexer/atomic-state.ts` does the standard POSIX write-then-rename instead, writing to a temp file in the same directory and renaming it over the target, so a reader sees either the complete old file or the complete new one and the live file is never opened for writing at all. A failed save leaves the previous state byte-identical and cleans up its temp file. The state directory is still created recursively as part of the write, so a fresh install is unaffected. The one gap left open deliberately is `fsync` before the rename, which is documented in the module.
+
 ## [0.3.0] — 2026-08
 
 Three months of work on the private side, brought across and re-scrubbed. The headline changes are the shape of the observation loop, a third adapter, and cost becoming a first-class control. Every documented command in `README.md` and `QUICKSTART.md` was run against this tree and its output matched to the doc.

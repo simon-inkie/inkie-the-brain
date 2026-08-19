@@ -38,6 +38,7 @@ import { readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { constants as bufferConstants } from "buffer";
+import { atomicStateFsMock } from "./atomic-state-fs-mock.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -203,15 +204,21 @@ async function makeHarness(filePath: string, maxEmbedsPerTick = 5000) {
 
   // Only the state file is faked. The transcript is read from the real disk,
   // through the real createReadStream, at real byte offsets.
+  //
+  // saveState persists atomically: the state becomes visible on the RENAME, not
+  // on the writeFile, and a direct write to STATE_FILE is rejected.
   let stateJson = JSON.stringify(EMPTY_STATE);
+  const stateFs = atomicStateFsMock(STATE_FILE, (data) => {
+    stateJson = data;
+  });
   vi.doMock("fs/promises", () => ({
     readFile: vi.fn(async (path: string) => {
       if (path === STATE_FILE) return stateJson;
       throw new Error(`unexpected readFile of a transcript: ${path}`);
     }),
-    writeFile: vi.fn(async (path: string, data: string) => {
-      if (path === STATE_FILE) stateJson = data;
-    }),
+    writeFile: stateFs.writeFile,
+    rename: stateFs.rename,
+    unlink: stateFs.unlink,
     stat: vi.fn(async (path: string) => statSync(path)),
     readdir: vi.fn(async () => []),
     appendFile: vi.fn(async () => undefined),
@@ -228,6 +235,15 @@ async function makeHarness(filePath: string, maxEmbedsPerTick = 5000) {
     mockDelete,
     checkpoint: (): SessionCheckpoint | undefined =>
       JSON.parse(stateJson).ccSessions[STATE_KEY],
+    /**
+     * Plant on-disk state directly, for tests that need to forge a checkpoint.
+     * Deliberately NOT routed through the fs mock's writeFile: this is fixture
+     * setup, not a save, and the mock rejects direct writes to the state path so
+     * a production regression to a non-atomic overwrite cannot hide.
+     */
+    forgeState: (state: unknown) => {
+      stateJson = JSON.stringify(state);
+    },
   };
 }
 
@@ -479,11 +495,7 @@ describe("reading a session transcript off disk", () => {
     });
 
     const bad = { ...cp, resumeLineStart: cp.resumeLineStart! + 7 };
-    const { writeFile } = await import("fs/promises");
-    await writeFile(
-      STATE_FILE,
-      JSON.stringify({ ...EMPTY_STATE, ccSessions: { [STATE_KEY]: bad } })
-    );
+    h.forgeState({ ...EMPTY_STATE, ccSessions: { [STATE_KEY]: bad } });
 
     await h.tick();
 
