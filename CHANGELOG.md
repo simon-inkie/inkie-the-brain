@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Per-collection score weights in ranked search** (`config.searchDefaults.collectionWeights`, applied in `core/qdrant/client.ts`). A noisier collection can be downweighted so it does not dominate the merged result list. The messages collection defaults to `0.93` and every other collection is implicitly `1.0`; `BRAIN_MESSAGES_SCORE_WEIGHT` overrides the default. Qdrant's `score_threshold` still runs server-side against the unweighted score, so a weight changes only the order of results, never which results are considered relevant. Search results now carry `rawScore` alongside `score` so the pre-weight value stays visible for diagnostics. A weight that is not a finite number greater than 0 is rejected with a warning and the default applies, because a NaN weight would otherwise reach the comparator and make the whole ranking unspecified.
+
 ### Fixed
 
 - **Indexer state files were not written crash-safely.** All three indexers persisted their resume checkpoint with a plain `writeFile` overwrite, which truncates the live file and then streams the new bytes in. A crash, SIGKILL, OOM kill or power cut between those two steps leaves truncated JSON on disk, and because `loadState()` parses inside a `try { } catch { return empty }` the corruption is silent: the indexer reports no error, decides it has never indexed anything, and the resume checkpoint is gone. A new `core/indexer/atomic-state.ts` does the standard POSIX write-then-rename instead, writing to a temp file in the same directory and renaming it over the target, so a reader sees either the complete old file or the complete new one and the live file is never opened for writing at all. A failed save leaves the previous state byte-identical and cleans up its temp file. The state directory is still created recursively as part of the write, so a fresh install is unaffected. The one gap left open deliberately is `fsync` before the rename, which is documented in the module.

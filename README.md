@@ -217,6 +217,7 @@ The brain reads `~/.the-brain/.env` at startup, because hooks run in a sandboxed
 | `EMBED_MAX_RETRIES` | `6` | Retries with exponential backoff on 429 and transient 5xx. |
 | `BRAIN_MESSAGES_COLLECTION` | `io-messages` | Build a transcript re-index into a fresh collection. |
 | `BRAIN_MESSAGE_INDEX_STATE` | under the state dir | Fresh state file for that rebuild, so it is a clean index rather than a delta. |
+| `BRAIN_MESSAGES_SCORE_WEIGHT` | `0.93` | Ranking multiplier for the messages collection at search merge time. Must be a finite number greater than 0; anything else is ignored with a warning and the default applies. |
 | `ERA_SUMMARY_MAX_BYTES` | `12000` | Byte cap on the era summary before the re-distill loop kicks in. |
 
 ---

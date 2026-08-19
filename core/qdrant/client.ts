@@ -104,6 +104,11 @@ export async function upsertPoints(
 
 export interface SearchResult {
   score: number;
+  /**
+   * The unweighted cosine score Qdrant returned, before the per-collection
+   * multiplier. Diagnostics only — `score` is what ranks.
+   */
+  rawScore?: number;
   source: string;
   collection: string;
   title: string;
@@ -175,10 +180,17 @@ export async function search(
         ...(qdrantFilter ? { filter: qdrantFilter } : {}),
       });
 
+      // Per-collection score multiplier, applied at the ONE merge point where
+      // results from different collections become comparable. Unlisted
+      // collections are x1.0, so this is a no-op for every collection that is
+      // not deliberately weighted. See config.searchDefaults.collectionWeights.
+      const weight = config.searchDefaults.collectionWeights[collection] ?? 1.0;
+
       for (const r of results) {
         const p = r.payload as Record<string, unknown>;
         const result: SearchResult = {
-          score: r.score,
+          score: r.score * weight,
+          rawScore: r.score,
           source: (p.source as string) ?? "",
           collection: (p.collection as string) ?? collection,
           title: (p.title as string) ?? (p.role ? `${p.role} message` : ""),
