@@ -116,7 +116,13 @@ Three runtimes ship, all reading and writing the same silos and the same Qdrant 
 
 ### Optional: `statusLine` context bar
 
-`adapters/claude-code/hooks/context-statusline.cjs` is a third opt-in, wired via the `statusLine` field in `~/agents/<name>/.claude/settings.json` rather than `hooks.json`. It renders `<agent> │ <model> │ <dir> │ <context bar> <used>%`, normalising Claude Code's reported `remaining_percentage` against the auto-compact buffer (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`, default 16.5%) so the bar reflects the usable window rather than the raw total. `AGENT_NAME` is read optionally and the segment is dropped when unset, so it degrades cleanly outside a multi-agent setup. As a side effect it best-effort writes Claude Code's own `rate_limits` stdin field to `~/.the-brain/usage/rate-limits.json`, for anything that wants a real weekly-window usage percentage rather than a token-count proxy.
+`adapters/claude-code/hooks/context-statusline.cjs` is a third opt-in, wired via the `statusLine` field in your project or user `~/.claude/settings.json` rather than `hooks.json`:
+
+```json
+{ "statusLine": { "type": "command", "command": "node /path/to/context-statusline.cjs" } }
+```
+
+It renders `<agent> │ <model> │ <dir> │ <context bar> <used>%`, normalising Claude Code's reported `remaining_percentage` against the auto-compact buffer (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`, default 16.5%) so the bar reflects the usable window rather than the raw total. `AGENT_NAME` is read optionally and the segment is dropped when unset; it exists for a multi-agent setup that sets it per agent home (`~/agents/<name>/.claude/settings.json`), not something a normal single-user install needs. As a side effect it best-effort writes Claude Code's own `rate_limits` stdin field to `~/.the-brain/usage/rate-limits.json`, for anything that wants a real weekly-window usage percentage rather than a token-count proxy.
 
 ---
 

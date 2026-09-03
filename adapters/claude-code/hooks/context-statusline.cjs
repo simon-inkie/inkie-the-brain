@@ -6,7 +6,11 @@
 // normalisation) and nothing else. Also writes a best-effort context bridge
 // file to tmp for any external context monitor that wants to read it.
 //
-// Wired per-agent via ~/agents/<name>/.claude/settings.json `statusLine`.
+// Wire it in via the `statusLine` field in your project or user
+// `~/.claude/settings.json`:
+//   { "statusLine": { "type": "command", "command": "node /path/to/context-statusline.cjs" } }
+// AGENT_NAME is read optionally, for a multi-agent setup that sets it per
+// agent home (e.g. ~/agents/<name>/.claude/settings.json); it is not required.
 
 const fs = require('fs');
 const path = require('path');
@@ -43,7 +47,8 @@ process.stdin.on('end', () => {
     else if (dir.startsWith(home + path.sep)) dir = '~' + dir.slice(home.length);
     const session = data.session_id || '';
     const remaining = data.context_window?.remaining_percentage;
-    const totalCtx = data.context_window?.total_tokens || 1_000_000;
+    const rawTotalCtx = data.context_window?.context_window_size;
+    const totalCtx = Number.isFinite(rawTotalCtx) && rawTotalCtx > 0 ? rawTotalCtx : 1_000_000;
 
     // Context usage bar (USED % of the usable window). Claude Code reserves a
     // buffer for auto-compact (~16.5% by default, overridable via
