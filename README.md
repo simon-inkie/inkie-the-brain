@@ -114,6 +114,16 @@ Three runtimes ship, all reading and writing the same silos and the same Qdrant 
 - **`persona-inject.sh`** emits `~/agents/<AGENT_NAME>/CORE.md` inline, plus a first-action instruction to read the fuller persona files. It only does anything when `AGENT_NAME` is set. Note the path: persona files live under `~/agents/<name>/`, which is a *different* directory from the memory silo at `~/.the-brain/agents/<name>/`. One holds who the agent is, the other holds what it remembers. Claude Code truncates hook output over 10,000 characters, so the hook enforces a 9,500-byte cap on the assembled block and emits the read-wrapper alone (with a loud log line) rather than a truncated CORE. `pnpm build` runs `scripts/core-guard.mjs`, which recomputes the same arithmetic and fails the build if any `CORE.md` is too large, so an oversized CORE cannot reach a live session.
 - **`obs-inject.sh`** moves the observation block out of the per-turn `UserPromptSubmit` injection and into the cached session prefix, which is cheaper because the block only changes at compaction. It is gated on `BRAIN_OBS_VIA_SESSIONSTART=1` and emits nothing while the flag is off. The flag governs both sides, so the block is never injected twice. Turn it on per agent, verify on that agent's next compaction, then move on.
 
+### Optional: `statusLine` context bar
+
+`adapters/claude-code/hooks/context-statusline.cjs` is a third opt-in, wired via the `statusLine` field in your project or user `~/.claude/settings.json` rather than `hooks.json`:
+
+```json
+{ "statusLine": { "type": "command", "command": "node /path/to/context-statusline.cjs" } }
+```
+
+It renders `<agent> │ <model> │ <dir> │ <context bar> <used>%`, normalising Claude Code's reported `remaining_percentage` against the auto-compact buffer (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`, default 16.5%) so the bar reflects the usable window rather than the raw total. `AGENT_NAME` is read optionally and the segment is dropped when unset; it exists for a multi-agent setup that sets it per agent home (`~/agents/<name>/.claude/settings.json`), not something a normal single-user install needs. As a side effect it best-effort writes Claude Code's own `rate_limits` stdin field to `~/.the-brain/usage/rate-limits.json`, for anything that wants a real weekly-window usage percentage rather than a token-count proxy.
+
 ---
 
 ## Repo layout
