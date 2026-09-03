@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added
 
+- **Optional `statusLine` context bar** (`adapters/claude-code/hooks/context-statusline.cjs`). Renders model, working directory and a context-usage bar normalised against the auto-compact buffer, wired per-agent via `~/agents/<name>/.claude/settings.json` rather than `hooks.json`. `AGENT_NAME` is read optionally so it degrades cleanly outside a multi-agent setup. Best-effort writes Claude Code's own `rate_limits` field to `~/.the-brain/usage/rate-limits.json` when present.
 - **Per-collection score weights in ranked search** (`config.searchDefaults.collectionWeights`, applied in `core/qdrant/client.ts`). A noisier collection can be downweighted so it does not dominate the merged result list. The messages collection defaults to `0.93` and every other collection is implicitly `1.0`; `BRAIN_MESSAGES_SCORE_WEIGHT` overrides the default. Qdrant's `score_threshold` still runs server-side against the unweighted score, so a weight changes only the order of results, never which results are considered relevant. Search results now carry `rawScore` alongside `score` so the pre-weight value stays visible for diagnostics. A weight that is not a finite number greater than 0 is rejected with a warning and the default applies, because a NaN weight would otherwise reach the comparator and make the whole ranking unspecified.
 
 ### Fixed
