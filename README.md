@@ -277,6 +277,8 @@ The brain reads `~/.the-brain/.env` at startup, because hooks run in a sandboxed
 
 Issues and PRs welcome. The codebase is tight, tests live under `test/`, and the architecture doc explains the moving parts.
 
+Work starts from a GitHub issue, on a branch named `<issue>-<slug>`, with a SPEC at `.specs/<issue>-<slug>/SPEC.md`. The workflow is in [DEVELOPMENT.md](./DEVELOPMENT.md) and the rules for agents in [AGENTS.md](./AGENTS.md).
+
 Before opening a PR, run `pnpm typecheck`, `pnpm test`, `pnpm check:leaks` and `pnpm check:licence`.
 
 If you've got an adapter for a runtime that isn't already supported, that's the highest-leverage contribution.
