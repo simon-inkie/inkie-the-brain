@@ -59,6 +59,7 @@ Out (see Follow-ups): non-Gemini providers for image, PDF and audio embeddings; 
 - `agent init` imports the Qdrant client at startup, which prints a "Failed to obtain server version" warning to stderr when Qdrant is down. Harmless to the exit code; lazy-loading the client would silence it.
 - Have `install.sh` optionally wire the MCP server entry in `settings.json`, as QUICKSTART step 5 does by hand.
 - A migration helper for switching embedding provider on an existing install (new collections plus reindex).
+- `isOurs` matches any command with our tail (a user's own wrapper with that tail would be rewritten); a dangling symlinked `settings.json` is replaced rather than written through; hook quoting assumes a POSIX shell.
 - `BRAIN_MODEL_CLI` and `BRAIN_MODEL_ARGS` cannot carry an argument containing a space (split on whitespace); a wrapper script is the workaround.
 - Windows-native support remains out of scope (bash-based loop).
 
@@ -71,6 +72,11 @@ Opus review of PR 17: changes needed. Each point and the response:
 3. **Symlinked settings.json replaced, permissions loosened.** Confirmed. `install-hooks.mjs` resolves the real path before writing and copies the original mode onto the temp file. Test covers a symlink to a mode 600 file.
 4. **Stale docs on the exit-code change.** Setup skill and `scripts/reindex-agent-silo.ts` updated. The PR body now says a rerun exits 0 and that exit 3 is a new failure path callers must handle.
 5. **"No extra cost" overstated.** Reworded in README and QUICKSTART: no separate key, runs on the existing model CLI and its plan.
+
+Re-review (approved with nits) follow-up:
+
+- **Custom `--dist` not named `claude-code` duplicated hooks on rerun.** Confirmed. A hook now also counts as ours when its command exactly equals the one being installed, so reruns with the same custom dist are idempotent. Moving a custom dist still adds a second entry (no tail to match); documented in `merge-hooks.mjs`. Test added.
+- Left as follow-ups: a user's own wrapper ending in the same tail would be rewritten; a dangling symlinked `settings.json` is replaced; quoting assumes a POSIX shell.
 
 Nits:
 

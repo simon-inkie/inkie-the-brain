@@ -9,6 +9,10 @@
  * path-agnostic. A checkout cloned under any name, or moved since the last
  * install, still matches its own earlier entry, which is rewritten in place
  * rather than duplicated. Hooks that are not ours are never touched.
+ *
+ * Limit: with a custom dist directory that is not named `claude-code`, a rerun
+ * with the same dist is recognised (exact command match), but moving that dist
+ * elsewhere adds a second entry, because there is no tail to match.
  */
 
 export class SettingsShapeError extends Error {}
@@ -32,8 +36,11 @@ function sameMatcher(groupMatcher, specMatcher) {
   return groupMatcher === specMatcher;
 }
 
-function isOurs(command, script) {
+function isOurs(command, script, current) {
   if (typeof command !== "string") return false;
+  // The exact command for the dist being installed always counts, so a custom
+  // --dist directory not named claude-code stays idempotent.
+  if (command.trim() === current.quoted || command.trim() === current.plain) return true;
   const bare = command.trim().replace(/^["']|["']$/g, "");  // quoted or legacy unquoted
   return bare.endsWith(`/claude-code/bin/${script}`) || bare.endsWith(`\\claude-code\\bin\\${script}`);
 }
@@ -58,7 +65,8 @@ export function mergeHooks(settings, binDir) {
   for (const spec of HOOK_SPECS) {
     // Claude Code runs the string through a shell, so the path is single
     // quoted: a space no longer splits it and $(...) or ; stay literal.
-    const command = shellQuote(`${dir}/${spec.script}`);
+    const plain = `${dir}/${spec.script}`;
+    const command = shellQuote(plain);
     if (settings.hooks[spec.event] === undefined) settings.hooks[spec.event] = [];
     const groups = settings.hooks[spec.event];
     if (!Array.isArray(groups)) {
@@ -71,7 +79,7 @@ export function mergeHooks(settings, binDir) {
       if (!group || typeof group !== "object" || !Array.isArray(group.hooks)) continue;
       if (!sameMatcher(group.matcher, spec.matcher)) continue;
       for (const hook of group.hooks) {
-        if (!hook || !isOurs(hook.command, spec.script)) continue;
+        if (!hook || !isOurs(hook.command, spec.script, { quoted: command, plain })) continue;
         found = true;
         if (hook.command !== command) {
           hook.command = command;

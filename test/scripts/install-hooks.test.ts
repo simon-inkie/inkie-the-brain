@@ -80,6 +80,16 @@ describe("mergeHooks", () => {
     expect(s.hooks.Stop).toHaveLength(1);
   });
 
+  it("stays idempotent with a custom dist directory not named claude-code", () => {
+    const custom = "/srv/brain-build/out/bin";
+    const s: any = {};
+    mergeHooks(s, custom);
+    const snapshot = JSON.stringify(s);
+    expect(mergeHooks(s, custom).every((x) => x.status === "unchanged")).toBe(true);
+    expect(JSON.stringify(s)).toBe(snapshot);
+    expect(s.hooks.Stop).toHaveLength(1);
+  });
+
   it("rejects shapes it cannot merge safely", () => {
     expect(() => mergeHooks([], BIN)).toThrow(SettingsShapeError);
     expect(() => mergeHooks({ hooks: [] }, BIN)).toThrow(SettingsShapeError);
