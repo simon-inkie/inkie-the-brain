@@ -92,14 +92,14 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 describe("observe.sh model configuration", () => {
   it("defaults to the claude CLI and the Haiku id, with no key set", () => {
     const r = run("observe.sh", []);
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     const [call] = calls();
     expect(call).toMatch(/^--print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt /);
   });
 
   it("honours BRAIN_MODEL_CLI and BRAIN_MODEL_ID from the environment", () => {
     const r = run("observe.sh", [], { BRAIN_MODEL_CLI: "my-llm", BRAIN_MODEL_ID: "small-1" });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()).toHaveLength(1);
     expect(calls()[0]).toContain("--model small-1");
   });
@@ -111,7 +111,7 @@ describe("observe.sh model configuration", () => {
       'BRAIN_MODEL_CLI=my-llm\nBRAIN_MODEL_ID="from-file"\n',
     );
     const r = run("observe.sh", []);
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()[0]).toContain("--model from-file");
   });
 
@@ -119,14 +119,14 @@ describe("observe.sh model configuration", () => {
     mkdirSync(join(home, ".the-brain"), { recursive: true });
     writeFileSync(join(home, ".the-brain", ".env"), "BRAIN_MODEL_ID=from-file\n");
     const r = run("observe.sh", [], { BRAIN_MODEL_ID: "from-env" });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()[0]).toContain("--model from-env");
     expect(calls()[0]).not.toContain("from-file");
   });
 
   it("passes no model flag when BRAIN_MODEL_ID is empty", () => {
     const r = run("observe.sh", [], { BRAIN_MODEL_ID: "" });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()[0]).not.toContain("--model");
   });
 
@@ -138,7 +138,7 @@ describe("observe.sh model configuration", () => {
       BRAIN_MODEL_SYSTEM_FLAG: "--sys",
       BRAIN_MODEL_ID: "tiny",
     });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()[0]).toMatch(/^run --quiet -m tiny --sys /);
   });
 });
@@ -149,7 +149,7 @@ describe("reflect.sh and compress-era.sh model configuration", () => {
     mkdirSync(join(memory, "observations"), { recursive: true });
     writeFileSync(join(memory, "observations", "2026-01-01-00-00-00.md"), "obs\n");
     const r = run("reflect.sh", [], { BRAIN_MODEL_CLI: "my-llm", BRAIN_MODEL_ID: "small-1" });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls()[0]).toMatch(
       /^--print --no-session-persistence --strict-mcp-config --model small-1 --system-prompt /,
     );
@@ -162,7 +162,7 @@ describe("reflect.sh and compress-era.sh model configuration", () => {
       BRAIN_MODEL_CLI: "my-llm",
       BRAIN_MODEL_ID: "small-1",
     });
-    expect(r.status).toBe(0);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     expect(calls().length).toBeGreaterThan(0);
     expect(calls()[0]).toContain("--model small-1");
   });
