@@ -78,6 +78,10 @@ Re-review (approved with nits) follow-up:
 - **Custom `--dist` not named `claude-code` duplicated hooks on rerun.** Confirmed. A hook now also counts as ours when its command exactly equals the one being installed, so reruns with the same custom dist are idempotent. Moving a custom dist still adds a second entry (no tail to match); documented in `merge-hooks.mjs`. Test added.
 - Left as follow-ups: a user's own wrapper ending in the same tail would be rewritten; a dangling symlinked `settings.json` is replaced; quoting assumes a POSIX shell.
 
+CI follow-up (macOS job):
+
+- Two of this PR's tests failed on macOS and are fixed: the model-config tests now run the scripts from a copy whose `build-context.sh` is a no-op (that script needs `flock` and a newer bash than macOS ships, and has its own suite), and the spaced-path unit test compares against the resolved path (`/var` is `/private/var` there). The remaining macOS failures (`build-context`, antigravity) also fail on `main` at 5a80cf8 and are not changed here.
+
 Nits:
 
 - Log JSON escaping: done (`BRAIN_MODEL_CLI_LOG`, `BRAIN_MODEL_ID_LOG`).

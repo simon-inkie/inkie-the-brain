@@ -7,6 +7,7 @@ import {
   chmodSync,
   copyFileSync,
   readdirSync,
+  cpSync,
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -19,9 +20,13 @@ import { fileURLToPath } from "node:url";
  * records its argv, so each case proves exactly what the scripts invoked.
  */
 
-const TOOLS = fileURLToPath(
+const TOOLS_SRC = fileURLToPath(
   new URL("../../adapters/openclaw/hooks/memory-tools/", import.meta.url),
 );
+// Scripts run from a copy whose build-context.sh is a no-op: these tests are
+// about which model CLI is called, and build-context.sh has its own suite
+// (and needs flock and a newer bash than macOS ships).
+let TOOLS: string;
 const TEMPLATES = fileURLToPath(new URL("../../templates/", import.meta.url));
 
 let root: string;
@@ -69,6 +74,9 @@ beforeEach(() => {
   mkdirSync(join(memory, "prompts"), { recursive: true });
   mkdirSync(home, { recursive: true });
   mkdirSync(bin, { recursive: true });
+  TOOLS = join(root, "tools");
+  cpSync(TOOLS_SRC, TOOLS, { recursive: true });
+  writeFileSync(join(TOOLS, "build-context.sh"), "#!/bin/bash\nexit 0\n");
   copyFileSync(join(TEMPLATES, "OBSERVATION-PROMPT.md"), join(memory, "OBSERVATION-PROMPT.md"));
   copyFileSync(join(TEMPLATES, "live-state.json"), join(memory, "live-state.json"));
   copyFileSync(join(TEMPLATES, "MEMORY.md"), join(root, "MEMORY.md"));

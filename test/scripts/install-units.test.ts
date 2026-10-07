@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync, lstatSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -79,14 +79,16 @@ describe("systemd unit installers", () => {
     const timer = spawnSync("bash", [join(spaced, "scripts", "install-timer.sh"), "--unit-dir", units, "--no-enable"], { encoding: "utf-8" });
     expect(timer.status).toBe(0);
     const svc = readFileSync(join(units, "snapshot-qdrant.service"), "utf-8");
-    expect(svc).toContain(`ExecStart="${spaced}/scripts/snapshot-qdrant.sh"`);
-    expect(svc).toContain(`Documentation=file://${spaced.replace(/ /g, "%%20")}/README.md`);
+    // The installer resolves symlinks (macOS tmpdir /var is /private/var).
+    const resolved = realpathSync(spaced);
+    expect(svc).toContain(`ExecStart="${resolved}/scripts/snapshot-qdrant.sh"`);
+    expect(svc).toContain(`Documentation=file://${resolved.replace(/ /g, "%%20")}/README.md`);
     const watcher = spawnSync("bash", [join(spaced, "scripts", "install-watcher.sh"), "--unit-dir", units, "--no-enable"], {
       encoding: "utf-8",
       env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
     });
     expect(watcher.status).toBe(0);
-    expect(readFileSync(join(units, "the-brain-watcher.service"), "utf-8")).toContain(`WorkingDirectory=${spaced}`);
+    expect(readFileSync(join(units, "the-brain-watcher.service"), "utf-8")).toContain(`WorkingDirectory=${resolved}`);
   });
 
   it("refuses a path with a double quote", () => {
