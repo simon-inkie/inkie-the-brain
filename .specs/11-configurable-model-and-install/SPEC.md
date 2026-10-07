@@ -80,7 +80,7 @@ Re-review (approved with nits) follow-up:
 
 CI follow-up (macOS job):
 
-- Two of this PR's tests failed on macOS and are fixed: the model-config tests now run the scripts from a copy whose `build-context.sh` is a no-op (that script needs `flock` and a newer bash than macOS ships, and has its own suite), and the spaced-path unit test compares against the resolved path (`/var` is `/private/var` there). The remaining macOS failures (`build-context`, antigravity) also fail on `main` at 5a80cf8 and are not changed here.
+- Two of this PR's tests failed on macOS and are fixed: the model-config tests now run the scripts from a copy whose `build-context.sh` is a no-op (that script needs `flock` and a newer bash than macOS ships, and has its own suite), and the spaced-path unit test compares against the resolved path (`/var` is `/private/var` there). `observe.sh` also piped the extracted system prompt through `head -n -0`, a no-op that BSD `head` rejects ("illegal line count"), so the script exited 1 on macOS before reaching the model call; the pipe is removed (output unchanged on GNU). The remaining macOS failures (`build-context`, antigravity) also fail on `main` at 5a80cf8 and are not changed here.
 
 Nits:
 
