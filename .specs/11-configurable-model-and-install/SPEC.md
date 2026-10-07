@@ -59,6 +59,7 @@ Out (see Follow-ups): non-Gemini providers for image, PDF and audio embeddings; 
 - `agent init` imports the Qdrant client at startup, which prints a "Failed to obtain server version" warning to stderr when Qdrant is down. Harmless to the exit code; lazy-loading the client would silence it.
 - Have `install.sh` optionally wire the MCP server entry in `settings.json`, as QUICKSTART step 5 does by hand.
 - A migration helper for switching embedding provider on an existing install (new collections plus reindex).
+- Make `build-context.sh` macOS-portable (no `flock`, bash 3.2 empty-array expansion under `set -u`); its suite and the antigravity suites fail on macOS on main too.
 - `isOurs` matches any command with our tail (a user's own wrapper with that tail would be rewritten); a dangling symlinked `settings.json` is replaced rather than written through; hook quoting assumes a POSIX shell.
 - `BRAIN_MODEL_CLI` and `BRAIN_MODEL_ARGS` cannot carry an argument containing a space (split on whitespace); a wrapper script is the workaround.
 - Windows-native support remains out of scope (bash-based loop).
