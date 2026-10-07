@@ -21,6 +21,10 @@
 #   BRAIN_MODEL_SYSTEM_FLAG  Flag that carries the system prompt.
 #                            Default: --system-prompt
 #
+# BRAIN_MODEL_CLI and BRAIN_MODEL_ARGS are split on whitespace, so a CLI path
+# or an argument that itself contains a space cannot be expressed; wrap such a
+# CLI in a small script and point BRAIN_MODEL_CLI at that.
+#
 # The CLI must read the user prompt on stdin and write the answer to stdout.
 # No API key is read here: the host's model CLI owns its own authentication.
 
@@ -71,3 +75,14 @@ brain_model_call() {
     cmd+=("$BRAIN_MODEL_SYSTEM_FLAG" "$system_prompt")
     "${cmd[@]}" 2>/dev/null
 }
+
+# JSON-escaped copies for the log lines, so a quote in a CLI path cannot make
+# a hook-activity.jsonl line invalid.
+_brain_json_escape() {
+    local v="$1"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    printf '%s' "$v"
+}
+BRAIN_MODEL_CLI_LOG="$(_brain_json_escape "$BRAIN_MODEL_CLI")"
+BRAIN_MODEL_ID_LOG="$(_brain_json_escape "$BRAIN_MODEL_ID")"

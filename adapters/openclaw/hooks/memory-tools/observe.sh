@@ -95,7 +95,7 @@ Output your observations using the XML format specified. Include <observations>,
 # flag and emit nothing, so the call stays lean and cannot recurse.
 export BRAIN_ONE_SHOT_SESSION=1
 echo "🔬 Running observation pass..."
-log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI\",\"model\":\"$BRAIN_MODEL_ID\",\"promptChars\":${#FULL_PROMPT}}"
+log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI_LOG\",\"model\":\"$BRAIN_MODEL_ID_LOG\",\"promptChars\":${#FULL_PROMPT}}"
 RESULT=$(echo "$FULL_PROMPT" | brain_model_call 0 "$SYSTEM_PROMPT" || true)
 
 if [ -z "$RESULT" ]; then

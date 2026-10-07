@@ -16,7 +16,10 @@
  * The first time an existing file is changed, the original is kept beside it
  * as <file>.the-brain.bak. An existing backup is never overwritten.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from "node:fs";
+import {
+  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync,
+  realpathSync, statSync, chmodSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -42,6 +45,9 @@ for (let i = 0; i < argv.length; i++) {
   } else if (a === "--dry-run") dryRun = true;
   else fail(1, `unknown argument ${a}`);
 }
+
+// Write through a symlink (dotfile managers) instead of replacing it.
+if (existsSync(settingsPath)) settingsPath = realpathSync(settingsPath);
 
 const binDir = join(dist, "bin");
 for (const spec of HOOK_SPECS) {
@@ -88,6 +94,8 @@ if (!changed) {
   if (existed && original.trim() !== "" && !existsSync(backup)) copyFileSync(settingsPath, backup);
   const tmp = `${settingsPath}.the-brain.tmp`;
   writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
+  // Keep the original permissions (a 600 settings file must not become 644).
+  if (existed) chmodSync(tmp, statSync(settingsPath).mode & 0o777);
   renameSync(tmp, settingsPath);
   console.log(`install-hooks: wrote ${settingsPath}`);
 }

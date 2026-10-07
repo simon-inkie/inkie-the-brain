@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, lstatSync, statSync, chmodSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -14,8 +14,8 @@ describe("mergeHooks", () => {
     const s: any = {};
     const r = mergeHooks(s, BIN);
     expect(r.map((x) => x.status)).toEqual(["added", "added", "added", "added"]);
-    expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toBe(`${BIN}/user-prompt-submit.sh`);
-    expect(s.hooks.Stop[0].hooks[0].command).toBe(`${BIN}/on-stop.sh`);
+    expect(s.hooks.UserPromptSubmit[0].hooks[0].command).toBe(`'${BIN}/user-prompt-submit.sh'`);
+    expect(s.hooks.Stop[0].hooks[0].command).toBe(`'${BIN}/on-stop.sh'`);
     expect(s.hooks.PreCompact.map((g: any) => g.matcher)).toEqual(["auto", "manual"]);
   });
 
@@ -50,9 +50,34 @@ describe("mergeHooks", () => {
     expect(r.every((x) => x.status === "updated")).toBe(true);
     expect(s.hooks.Stop).toHaveLength(1);
     expect(s.hooks.Stop[0].hooks[0].command).toBe(
-      "/srv/deck/vendor/brain-copy/dist/claude-code/bin/on-stop.sh",
+      "'/srv/deck/vendor/brain-copy/dist/claude-code/bin/on-stop.sh'",
     );
     expect(s.hooks.PreCompact).toHaveLength(2);
+  });
+
+  it("writes shell-safe commands for paths with spaces, quotes and $(...)", () => {
+    const nasty = "/tmp/sp ace/b$(touch PWNED);x/it's/claude-code/bin";
+    const s: any = {};
+    mergeHooks(s, nasty);
+    const cmd = s.hooks.Stop[0].hooks[0].command as string;
+    // Run it through a shell as Claude Code does: it must name the file, nothing else.
+    const out = spawnSync("bash", ["-c", `printf '%s' ${cmd}`], { encoding: "utf-8", cwd: tmpdir() });
+    expect(out.stdout).toBe(`${nasty}/on-stop.sh`);
+    // and a rerun recognises its own quoted entry
+    expect(mergeHooks(s, nasty).every((x) => x.status === "unchanged")).toBe(true);
+  });
+
+  it("upgrades a legacy unquoted entry in place", () => {
+    const s: any = { hooks: { Stop: [{ hooks: [{ type: "command", command: `${BIN}/on-stop.sh` }] }] } };
+    mergeHooks(s, BIN);
+    expect(s.hooks.Stop).toHaveLength(1);
+    expect(s.hooks.Stop[0].hooks[0].command).toBe(`'${BIN}/on-stop.sh'`);
+  });
+
+  it("treats a catch-all matcher on Stop as the same group", () => {
+    const s: any = { hooks: { Stop: [{ matcher: "*", hooks: [{ type: "command", command: `/old/claude-code/bin/on-stop.sh` }] }] } };
+    mergeHooks(s, BIN);
+    expect(s.hooks.Stop).toHaveLength(1);
   });
 
   it("rejects shapes it cannot merge safely", () => {
@@ -100,6 +125,20 @@ describe("install-hooks.mjs", () => {
     expect(run().status).toBe(0);
     expect(JSON.parse(readFileSync(`${settings}.the-brain.bak`, "utf-8"))).toEqual({ theme: "dark" });
     expect(JSON.parse(readFileSync(settings, "utf-8")).theme).toBe("dark");
+  });
+
+  it("writes through a symlinked settings.json and keeps its mode", () => {
+    const real = join(dir, "dotfiles", "real.json");
+    mkdirSync(dirname(real), { recursive: true });
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(real, JSON.stringify({ theme: "dark" }));
+    chmodSync(real, 0o600);
+    symlinkSync(real, settings);
+    expect(run().status).toBe(0);
+    expect(lstatSync(settings).isSymbolicLink()).toBe(true);
+    expect(statSync(real).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(real, "utf-8")).hooks.Stop).toHaveLength(1);
+    expect(JSON.parse(readFileSync(real, "utf-8")).theme).toBe("dark");
   });
 
   it("exits 3 on invalid JSON and leaves the file byte-identical", () => {

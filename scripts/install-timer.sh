@@ -52,13 +52,15 @@ fi
 
 [ -f "$ROOT/scripts/snapshot-qdrant.sh" ] || die 2 "$ROOT is not a the-brain checkout (no scripts/snapshot-qdrant.sh)"
 ROOT="$(cd -P "$ROOT" && pwd)"
+check_unit_path "$ROOT" || die 1 "checkout path contains a quote, backslash or newline: $ROOT"
+ROOT_URL="$(urlencode_path "$ROOT")"
 
 mkdir -p "$UNIT_DIR"
 # Replace any symlink left by an earlier version of this script, so the write
 # below does not go through it into the checkout's template.
 rm -f "$UNIT_DIR/$SERVICE_NAME" "$UNIT_DIR/$TIMER_NAME"
-render_unit "$SCRIPT_DIR/$SERVICE_NAME" "BRAIN_ROOT=$ROOT" > "$UNIT_DIR/$SERVICE_NAME"
-render_unit "$SCRIPT_DIR/$TIMER_NAME" "BRAIN_ROOT=$ROOT" > "$UNIT_DIR/$TIMER_NAME"
+render_unit "$SCRIPT_DIR/$SERVICE_NAME" "BRAIN_ROOT=$ROOT" "BRAIN_ROOT_URL=$ROOT_URL" > "$UNIT_DIR/$SERVICE_NAME"
+render_unit "$SCRIPT_DIR/$TIMER_NAME" "BRAIN_ROOT=$ROOT" "BRAIN_ROOT_URL=$ROOT_URL" > "$UNIT_DIR/$TIMER_NAME"
 echo "install-timer: wrote units to $UNIT_DIR (root $ROOT)"
 
 if [ "$ENABLE" -eq 0 ]; then

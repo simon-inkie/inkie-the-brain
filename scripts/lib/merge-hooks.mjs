@@ -20,9 +20,21 @@ export const HOOK_SPECS = [
   { event: "PreCompact", matcher: "manual", script: "on-pre-compact.sh", timeout: 10 },
 ];
 
+function shellQuote(path) {
+  return `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+// For events without a matcher, "" and "*" mean the same as no matcher.
+function sameMatcher(groupMatcher, specMatcher) {
+  if (specMatcher === undefined) {
+    return groupMatcher === undefined || groupMatcher === "" || groupMatcher === "*";
+  }
+  return groupMatcher === specMatcher;
+}
+
 function isOurs(command, script) {
   if (typeof command !== "string") return false;
-  const bare = command.trim().replace(/^["']|["']$/g, "");
+  const bare = command.trim().replace(/^["']|["']$/g, "");  // quoted or legacy unquoted
   return bare.endsWith(`/claude-code/bin/${script}`) || bare.endsWith(`\\claude-code\\bin\\${script}`);
 }
 
@@ -44,7 +56,9 @@ export function mergeHooks(settings, binDir) {
   const results = [];
 
   for (const spec of HOOK_SPECS) {
-    const command = `${dir}/${spec.script}`;
+    // Claude Code runs the string through a shell, so the path is single
+    // quoted: a space no longer splits it and $(...) or ; stay literal.
+    const command = shellQuote(`${dir}/${spec.script}`);
     if (settings.hooks[spec.event] === undefined) settings.hooks[spec.event] = [];
     const groups = settings.hooks[spec.event];
     if (!Array.isArray(groups)) {
@@ -55,7 +69,7 @@ export function mergeHooks(settings, binDir) {
     let found = false;
     for (const group of groups) {
       if (!group || typeof group !== "object" || !Array.isArray(group.hooks)) continue;
-      if ((group.matcher ?? undefined) !== spec.matcher) continue;
+      if (!sameMatcher(group.matcher, spec.matcher)) continue;
       for (const hook of group.hooks) {
         if (!hook || !isOurs(hook.command, spec.script)) continue;
         found = true;

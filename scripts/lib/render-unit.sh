@@ -19,3 +19,27 @@ render_unit() {
     done
     printf '%s\n' "$text"
 }
+
+# check_unit_path PATH: units are written with the path inside double quotes,
+# where a backslash or a double quote would need escaping. Real checkouts do not
+# have them, so refuse rather than half-escape. Returns 1 when unusable.
+check_unit_path() {
+    case "$1" in
+        *\"*|*\\*|*$'\n'*) return 1 ;;
+    esac
+    return 0
+}
+
+# urlencode_path PATH: percent-encode everything but unreserved characters and
+# "/", for the Documentation=file:// line.
+urlencode_path() {
+    local s="$1" out="" c i
+    for ((i = 0; i < ${#s}; i++)); do
+        c="${s:i:1}"
+        case "$c" in
+            [a-zA-Z0-9/._~-]) out+="$c" ;;
+            *) out+="$(printf '%%%02X' "'$c")" ;;
+        esac
+    done
+    printf '%s' "$out"
+}

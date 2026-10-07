@@ -54,7 +54,9 @@ fi
 [ -d "$ROOT" ] && [ -f "$ROOT/daemon/watcher.ts" ] || die 2 "$ROOT is not a the-brain checkout (no daemon/watcher.ts)"
 ROOT="$(cd -P "$ROOT" && pwd)"
 PNPM="$(command -v pnpm || true)"
+check_unit_path "$ROOT" || die 1 "checkout path contains a quote, backslash or newline: $ROOT"
 [ -n "$PNPM" ] || die 2 "pnpm not found on PATH"
+check_unit_path "$PNPM" || die 1 "pnpm path contains a quote, backslash or newline: $PNPM"
 
 case "$EXTRAS" in
     ""|none|all|media-filer|poke-agy|media-filer,poke-agy|poke-agy,media-filer) ;;

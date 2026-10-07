@@ -41,7 +41,7 @@ The "target dir" is where the pointer file goes — usually the repo/worktree ro
 
 Before creating anything:
 
-1. Does `~/.the-brain/agents/<name>/` already exist? If yes, surface: "An agent named `<name>` already exists. Options: (a) reuse it — add the pointer only; (b) pick a new name." Don't silently clobber.
+1. Does `~/.the-brain/agents/<name>/` already exist? If yes, surface: "An agent named `<name>` already exists. Options: (a) reuse it — add the pointer only; (b) pick a new name." `agent init` never overwrites existing files (a rerun exits 0 and only restores missing seed files), so (a) is safe; the question is whether the user meant a different agent.
 2. Does `<target>/.the-brain/memory_root` already exist? If yes, read it. If it points at the same agent, you're done. If it points at a DIFFERENT agent, surface: "This worktree is already linked to `<other-agent>`. Override?" Don't clobber silently.
 
 ## Run the init

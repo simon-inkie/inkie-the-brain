@@ -34,7 +34,7 @@ Two layers, with different requirements. Nothing in the memory loop needs an emb
 
 | Layer | What it does | Needs |
 |---|---|---|
-| **Memory loop** (M1) | Observes, reflects, compresses eras and injects the memory block. Files on disk. | Only the model CLI your host already has (by default `claude`). No API key from this project, no extra cost. |
+| **Memory loop** (M1) | Observes, reflects, compresses eras and injects the memory block. Files on disk. | Only the model CLI your host already has (by default `claude`). No API key from this project; it runs on your existing model CLI and its plan (a Haiku-class call per observation, reflection and era compression). |
 | **Semantic search** (M2) | Indexes into Qdrant and answers `remembering` / `pnpm run search`. | Qdrant, plus an embeddings provider. The default is a Google Gemini API key (free tier works); a local offline model works too, see [Embeddings provider](#embeddings-provider). |
 
 `EMBED_DRY_RUN=true` runs the embedder with no key at all, which is the keyless way to check an install.
@@ -284,7 +284,7 @@ Notes:
 
 - **Dimensions are fixed per collection.** `EMBED_DIMENSIONS` must equal the model's output size. A wrong size fails loudly on the first call. Switching provider or model on an install that already has collections needs a fresh set: the old vectors are not comparable, and Qdrant fixes the size at creation.
 - **Images, PDFs and audio stay Gemini-only.** Text, observations, reflections and transcripts go through the seam; the asset pipeline (`core/embedder/assets.ts`) still needs `GEMINI_API_KEY`.
-- **Spend tracking is Gemini's.** Only the `gemini` provider is priced by the ledger. The per-tick kill switch applies to every provider.
+- **Spend tracking is Gemini's.** Only the `gemini` provider is priced by the ledger; a hosted `openai` provider is not priced or capped by dollar amount, only by the per-tick kill switch. The per-tick kill switch applies to every provider.
 
 ---
 

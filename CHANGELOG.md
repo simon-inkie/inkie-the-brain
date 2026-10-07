@@ -15,7 +15,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 ### Changed
 
 - **`agent init <name>` is idempotent and scriptable.** A rerun exits 0 and restores missing seed files instead of exiting 1; `--link` is validated before anything is created; a pointer to a different silo exits 3 unless `--relink` is given. Exit codes are documented in the README.
-- **`pnpm watch` no longer starts the media filer and `poke-agy` watchers by default.** Set `BRAIN_WATCH_EXTRAS=media-filer,poke-agy` (or `all`) to get the previous behaviour.
+- **`pnpm watch` no longer starts the media filer and `poke-agy` watchers by default.** Set `BRAIN_WATCH_EXTRAS=media-filer,poke-agy` (or `all`) to get the previous behaviour. **Upgrade note:** existing OpenClaw and agy installs must set it, for example in the watcher unit via `scripts/install-watcher.sh --extras all`, or those watchers silently stop.
 - **README and QUICKSTART now say what needs what.** The memory loop needs only the host's model CLI; an embeddings key is only for semantic search.
 - The setup skill finds the checkout instead of assuming `~/the-brain/`.
 

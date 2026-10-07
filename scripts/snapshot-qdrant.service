@@ -4,13 +4,13 @@
 # the checkout path, so the checkout can live anywhere and have any name.
 [Unit]
 Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
-Documentation=file://@BRAIN_ROOT@/README.md
+Documentation=file://@BRAIN_ROOT_URL@/README.md
 Wants=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=@BRAIN_ROOT@/scripts/snapshot-qdrant.sh
+ExecStart="@BRAIN_ROOT@/scripts/snapshot-qdrant.sh"
 # Redirect output to journal — view with `journalctl --user -u snapshot-qdrant`
 StandardOutput=journal
 StandardError=journal

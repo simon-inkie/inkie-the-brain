@@ -13,7 +13,7 @@ If you'd rather have an AI install it for you, see the **🤖 Install with AI** 
 | **Node 22+** | Runtime for hooks, MCP server, CLI | `node --version` |
 | **pnpm 9 or 10** | Package manager | `pnpm --version`. Install with `corepack enable && corepack prepare pnpm@9.15.0 --activate` |
 | **Docker** (or a **Qdrant Cloud** account) | Vector store | `docker --version` |
-| **A model CLI** | The memory loop (observe, reflect, compress) calls it. This is the CLI your agent runtime already uses, `claude` by default. No separate key and no extra cost. | `claude --version` |
+| **A model CLI** | The memory loop (observe, reflect, compress) calls it. This is the CLI your agent runtime already uses, `claude` by default. No separate key; it runs on your existing model CLI and its plan. | `claude --version` |
 | **Embeddings key** (semantic search only) | `GEMINI_API_KEY` for the default provider. Not needed for the memory loop, and not needed at all with a local model or `EMBED_DRY_RUN=true`. | Free tier at <https://aistudio.google.com/app/apikey> |
 | **An agent runtime** | Where the hooks fire | Claude Code, Antigravity (agy) or OpenClaw. This guide wires Claude Code; see [`README.md`](./README.md#adapters) for the other two. |
 

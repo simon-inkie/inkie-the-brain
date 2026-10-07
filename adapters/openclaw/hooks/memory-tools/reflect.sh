@@ -114,7 +114,7 @@ OUTPUT_FILE="$REF_DIR/$TIMESTAMP.md"
 # One-shot model call, not an interactive session (see observe.sh).
 export BRAIN_ONE_SHOT_SESSION=1
 echo "🧠 Running reflection..."
-log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI\",\"model\":\"$BRAIN_MODEL_ID\",\"promptChars\":${#FULL_PROMPT}}"
+log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI_LOG\",\"model\":\"$BRAIN_MODEL_ID_LOG\",\"promptChars\":${#FULL_PROMPT}}"
 RESULT=$(echo "$FULL_PROMPT" | brain_model_call 1 "$SYSTEM_PROMPT" || true)
 
 if [ -z "$RESULT" ]; then
