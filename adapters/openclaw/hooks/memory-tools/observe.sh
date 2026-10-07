@@ -55,7 +55,7 @@ fi
 
 # Extract system prompt from OBSERVATION-PROMPT.md
 # The system prompt is between the first pair of triple backticks in the "## System Prompt" section
-SYSTEM_PROMPT=$(sed -n '/^## System Prompt/,/^## User Prompt/{ /^```$/,/^```$/{ /^```$/d; p; } }' "$PROMPT_FILE")
+SYSTEM_PROMPT=$(sed -n '/^## System Prompt/,/^## User Prompt/{ /^```$/,/^```$/{ /^```$/d; p; }; }' "$PROMPT_FILE")
 
 # If extraction failed, use a simpler approach
 if [ -z "$SYSTEM_PROMPT" ]; then

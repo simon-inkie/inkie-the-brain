@@ -89,3 +89,7 @@ Nits:
 - Hook already under matcher `""` or `*`: now recognised for events without a matcher, so no duplicate.
 - Opt-in watchers as a silent change: upgrade note added to the changelog; PR body calls out that both watchers were covered although the issue said "the extra watcher".
 - Hosted `openai` provider not priced: now stated in the README.
+
+### macOS: observe.sh sed
+
+CI log showed `sed: extra characters at the end of } command` from `observe.sh`: BSD sed needs `;` before a closing brace. Fixed in `observe.sh` (nested block now ends `; }; }`). The remaining macOS L1 failures are `build-context.test.ts` (no `flock`, bash 3.2 empty-array handling), which also fail on main and are out of scope here.
