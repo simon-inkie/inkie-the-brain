@@ -5,8 +5,9 @@
 // Also seeds the runtime scaffolding (MEMORY.md, OBSERVATION-PROMPT.md,
 // live-state.json) from the-brain's templates/ if absent — so a post-
 // migration silo is immediately usable by the context-injection hook.
-// `the-brain agent init` refuses on existing silos; this helper fills the
-// gap for silos that predate or were merged into by a migration.
+// `the-brain agent init` is idempotent and only restores seed files that are
+// missing; this helper additionally reindexes, and covers silos that predate
+// or were merged into by a migration.
 
 import "../core/env.js";
 import { readdir, stat, copyFile, mkdir } from "fs/promises";

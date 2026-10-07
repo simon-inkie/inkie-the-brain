@@ -12,6 +12,8 @@ export PATH="$HOME/.local/bin:$PATH"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=_log.sh
 source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+# shellcheck source=_model.sh
+source "$SCRIPT_DIR/_model.sh"
 
 MEMORY_DIR="${MEMORY_DIR:-$(dirname "$SCRIPT_DIR")}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$(dirname "$MEMORY_DIR")}"
@@ -102,7 +104,7 @@ Please analyse these observations and produce a refined, condensed version that 
 
 $COMPRESSION"
 
-# Call Claude.
+# Call the configured model CLI (see _model.sh).
 # Second-resolution timestamp (not just date) so multiple reflections in
 # the same day — e.g. a manual replay-transcript reflect followed later
 # by an AUTO_REFLECT from a PreCompact — don't overwrite each other.
@@ -112,12 +114,12 @@ OUTPUT_FILE="$REF_DIR/$TIMESTAMP.md"
 # One-shot model call, not an interactive session (see observe.sh).
 export BRAIN_ONE_SHOT_SESSION=1
 echo "🧠 Running reflection..."
-log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
-RESULT=$(echo "$FULL_PROMPT" | claude --print --no-session-persistence --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
+log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI_LOG\",\"model\":\"$BRAIN_MODEL_ID_LOG\",\"promptChars\":${#FULL_PROMPT}}"
+RESULT=$(echo "$FULL_PROMPT" | brain_model_call 1 "$SYSTEM_PROMPT" || true)
 
 if [ -z "$RESULT" ]; then
     log error "claude-call-failed" "{\"reason\":\"empty-result\"}"
-    echo "Error: Claude returned empty result"
+    echo "Error: model CLI ($BRAIN_MODEL_CLI) returned empty result"
     exit 1
 fi
 log info "claude-call-ok" "{\"resultChars\":${#RESULT}}"

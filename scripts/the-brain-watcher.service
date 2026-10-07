@@ -1,20 +1,16 @@
-# The Brain File Watcher — systemd user service
+# The Brain File Watcher — systemd user service TEMPLATE
 #
-# Install:
-#   cp scripts/the-brain-watcher.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
-#   systemctl --user enable the-brain-watcher
-#   systemctl --user start the-brain-watcher
+# Do not copy this file by hand. It carries placeholders that
+# scripts/install-watcher.sh fills in, so the checkout can live anywhere and
+# have any name:
 #
-# Check status:
-#   systemctl --user status the-brain-watcher
-#   journalctl --user -u the-brain-watcher -f
+#   scripts/install-watcher.sh                          # this checkout
+#   scripts/install-watcher.sh --extras media-filer     # also start that watcher
+#   scripts/install-watcher.sh --root /opt/brain-copy   # a different checkout
+#   scripts/install-watcher.sh --uninstall
 #
-# Stop:
-#   systemctl --user stop the-brain-watcher
-#
-# Adjust WorkingDirectory and EnvironmentFile below if your checkout or env
-# file live elsewhere; systemd cannot resolve those paths itself.
+# Check status:  systemctl --user status the-brain-watcher
+# Logs:          journalctl --user -u the-brain-watcher -f
 
 [Unit]
 Description=The Brain File Watcher — auto-indexes brain + memory files into Qdrant
@@ -22,10 +18,13 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/the-brain
-ExecStart=%h/.local/share/pnpm/pnpm watch
+WorkingDirectory=@BRAIN_ROOT@
+ExecStart="@PNPM@" watch
 Restart=on-failure
 RestartSec=5
+# Optional watchers beyond the main file watcher: media-filer, poke-agy, all.
+# Empty means none. See core/watch-extras.ts.
+Environment=BRAIN_WATCH_EXTRAS=@WATCH_EXTRAS@
 # Both optional (the leading '-'), so a missing file is not a start failure.
 # Listed legacy-first: systemd lets a later file override an earlier one, so
 # ~/.the-brain/.env (the documented location) wins where both exist.
