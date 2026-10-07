@@ -143,7 +143,7 @@ cpSync(
   { recursive: true },
 );
 // Ensure scripts stay executable
-for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.sh"]) {
+for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.sh", "_model.sh"]) {
   const p = join(hooksDist, "memory-tools", f);
   if (existsSync(p)) chmodSync(p, 0o755);
 }
@@ -226,7 +226,7 @@ cpSync(
   join(ccDist, "memory-tools"),
   { recursive: true },
 );
-for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.sh"]) {
+for (const f of ["observe.sh", "reflect.sh", "build-context.sh", "compress-era.sh", "_model.sh"]) {
   const p = join(ccDist, "memory-tools", f);
   if (existsSync(p)) chmodSync(p, 0o755);
 }

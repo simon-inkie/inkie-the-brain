@@ -28,7 +28,7 @@ export function isDryRun(): boolean {
     DRY_RUN = process.env.EMBED_DRY_RUN === "true";
     if (DRY_RUN) {
       console.error(
-        "[embedder] ⚠️  EMBED_DRY_RUN=true — no Gemini calls will be made; zero-vectors returned; Qdrant mutations skipped at indexer layer"
+        "[embedder] ⚠️  EMBED_DRY_RUN=true — no embedding calls will be made; zero-vectors returned; Qdrant mutations skipped at indexer layer"
       );
     }
   }

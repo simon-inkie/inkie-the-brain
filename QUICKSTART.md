@@ -13,7 +13,8 @@ If you'd rather have an AI install it for you, see the **🤖 Install with AI** 
 | **Node 22+** | Runtime for hooks, MCP server, CLI | `node --version` |
 | **pnpm 9 or 10** | Package manager | `pnpm --version`. Install with `corepack enable && corepack prepare pnpm@9.15.0 --activate` |
 | **Docker** (or a **Qdrant Cloud** account) | Vector store | `docker --version` |
-| **Gemini API key** | Embeddings and the observation LLM | Free tier at <https://aistudio.google.com/app/apikey> |
+| **A model CLI** | The memory loop (observe, reflect, compress) calls it. This is the CLI your agent runtime already uses, `claude` by default. No separate key and no extra cost. | `claude --version` |
+| **Embeddings key** (semantic search only) | `GEMINI_API_KEY` for the default provider. Not needed for the memory loop, and not needed at all with a local model or `EMBED_DRY_RUN=true`. | Free tier at <https://aistudio.google.com/app/apikey> |
 | **An agent runtime** | Where the hooks fire | Claude Code, Antigravity (agy) or OpenClaw. This guide wires Claude Code; see [`README.md`](./README.md#adapters) for the other two. |
 
 Pin pnpm rather than taking `pnpm@latest`: CI and the Docker install-test image both use `9.15.0`, and the committed lockfile is version 9.0. pnpm 10 works too. pnpm 11 wants to rewrite the lockfile and will refuse to reuse a `node_modules` installed by an older major.
@@ -76,7 +77,7 @@ The Antigravity adapter is **not** bundled. It runs from the checkout, so there 
 
 ## 3. Set environment
 
-The brain reads its API keys and config from `~/.the-brain/.env`:
+The brain reads its config from `~/.the-brain/.env`. **The memory loop needs nothing from this file**: it runs on the model CLI you already have. Only semantic search (steps 5 and 6) needs an embeddings key:
 
 ```bash
 mkdir -p ~/.the-brain
@@ -98,11 +99,19 @@ Every entry point resolves the env file the same way, first hit winning:
 
 Variables already present in the environment always win. The file only fills gaps, so exporting `GEMINI_API_KEY` in your shell overrides whatever the file says.
 
+**No Google key?** Point semantic search at a local model instead (no key, works offline), for example Ollama's `nomic-embed-text`: set `EMBED_PROVIDER=openai`, `EMBED_MODEL=nomic-embed-text` and `EMBED_DIMENSIONS=768` here. The options are in [`README.md`](./README.md#embeddings-provider).
+
+**Different model CLI for the loop?** `BRAIN_MODEL_CLI` and `BRAIN_MODEL_ID` change what `observe.sh`, `reflect.sh` and `compress-era.sh` call; the defaults are `claude` and `claude-haiku-4-5-20251001`.
+
+**Verify with no key at all:** `EMBED_DRY_RUN=true` runs the embedder without any embedding call. The `pnpm index` and `pnpm run search` commands still need Qdrant reachable (step 1).
+
 The full list of supported variables is in [`README.md`](./README.md#environment-variables). Two worth knowing on day one: `EMBED_DRY_RUN=true` runs the indexer end to end without making a single Gemini call, and `MAX_EMBEDS_PER_TICK` is the kill switch that stops a runaway index.
 
 ---
 
 ## 4. Wire the Claude Code hooks
+
+**Shortcut.** `scripts/install.sh --skip-build --settings ~/.claude/settings.json` does this whole step: it merges the hooks below, leaves your other settings alone, and is safe to run again. Add `--agent <name> --link <worktree>` to create the memory silo in the same call. The rest of this section is the manual equivalent.
 
 Three hooks in `~/.claude/settings.json`. If you already have a `hooks` block, merge; don't replace.
 
@@ -311,6 +320,6 @@ You should see `"component":"user-prompt-submit","event":"hook-fired"` entries o
 
 - Read [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the design intuition
 - Browse [`templates/OBSERVATION-PROMPT.md`](./templates/OBSERVATION-PROMPT.md) to see how observations are extracted
-- Wire up the daemon (`pnpm watch`) for live re-indexing as you add files to `~/brain/`
+- Wire up the daemon (`pnpm watch`) for live re-indexing as you add files to `~/brain/`. It starts only the main file watcher; add `BRAIN_WATCH_EXTRAS=media-filer,poke-agy` if you use those runtimes
 - Run `scripts/health-check.sh` for a one-shot report on Qdrant, the collections, the services and every agent silo
-- Set up the systemd units in `scripts/` (Linux only) for unattended operation. They use `%h` for your home directory but still assume the checkout is at `%h/the-brain`, so adjust that path if yours differs.
+- Set up the systemd units (Linux only) for unattended operation: `scripts/install-watcher.sh` and `scripts/install-timer.sh`. Both take `--root DIR`, so the checkout can have any name and live anywhere.

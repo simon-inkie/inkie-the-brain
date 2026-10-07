@@ -6,6 +6,19 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added
 
+- **Configurable memory-loop model** (`adapters/openclaw/hooks/memory-tools/_model.sh`). `observe.sh`, `reflect.sh` and `compress-era.sh` read the model CLI and id from `BRAIN_MODEL_CLI`, `BRAIN_MODEL_ID` (and `BRAIN_MODEL_ARGS`, `BRAIN_MODEL_FLAG`, `BRAIN_MODEL_SYSTEM_FLAG` for other CLIs) from the environment or the env file. Defaults reproduce the previous `claude` and Haiku invocation exactly.
+- **Embedding provider seam** (`core/embedder/provider.ts`). `EMBED_PROVIDER=gemini` (default) or `openai` for any OpenAI-compatible endpoint, including local offline servers; `EMBED_MODEL`, `EMBED_DIMENSIONS`, `EMBED_BASE_URL`, `EMBED_API_KEY`, `EMBED_QUERY_PREFIX`, `EMBED_DOCUMENT_PREFIX`. Image, PDF and audio embedding remain Gemini-only.
+- **`scripts/install.sh`**, a non-interactive, idempotent install: build, merge the `UserPromptSubmit`, `Stop` and `PreCompact` (auto and manual) hooks into a target `settings.json` without disturbing other settings (`scripts/install-hooks.mjs`), and optionally seed a silo. Works for a checkout of any name or location.
+- **`scripts/install-watcher.sh`** and a `--root` option on `install-timer.sh`, rendering the systemd user units for any checkout path.
+- **`templates/RECALL-INSTRUCTIONS.md`**, a runtime-neutral block describing when to search memory, how to call search and where durable notes go.
+
+### Changed
+
+- **`agent init <name>` is idempotent and scriptable.** A rerun exits 0 and restores missing seed files instead of exiting 1; `--link` is validated before anything is created; a pointer to a different silo exits 3 unless `--relink` is given. Exit codes are documented in the README.
+- **`pnpm watch` no longer starts the media filer and `poke-agy` watchers by default.** Set `BRAIN_WATCH_EXTRAS=media-filer,poke-agy` (or `all`) to get the previous behaviour.
+- **README and QUICKSTART now say what needs what.** The memory loop needs only the host's model CLI; an embeddings key is only for semantic search.
+- The setup skill finds the checkout instead of assuming `~/the-brain/`.
+
 - **Optional `statusLine` context bar** (`adapters/claude-code/hooks/context-statusline.cjs`). Renders model, working directory and a context-usage bar normalised against the auto-compact buffer, wired via the `statusLine` field in `~/.claude/settings.json` rather than `hooks.json`. `AGENT_NAME` is read optionally so it degrades cleanly outside a multi-agent setup. Best-effort writes Claude Code's own `rate_limits` field to `~/.the-brain/usage/rate-limits.json` when present.
 - **Per-collection score weights in ranked search** (`config.searchDefaults.collectionWeights`, applied in `core/qdrant/client.ts`). A noisier collection can be downweighted so it does not dominate the merged result list. The messages collection defaults to `0.93` and every other collection is implicitly `1.0`; `BRAIN_MESSAGES_SCORE_WEIGHT` overrides the default. Qdrant's `score_threshold` still runs server-side against the unweighted score, so a weight changes only the order of results, never which results are considered relevant. Search results now carry `rawScore` alongside `score` so the pre-weight value stays visible for diagnostics. A weight that is not a finite number greater than 0 is rejected with a warning and the default applies, because a NaN weight would otherwise reach the comparator and make the whole ranking unspecified.
 

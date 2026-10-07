@@ -21,8 +21,9 @@
 #   memory/era-summary.meta.json — { level, updatedAt, coverageLatestReflectionDate,
 #                                   sourceReflectionCount, charCount }
 #
-# Calls Claude Haiku 4.5 via the `claude` CLI in print mode (matches reflect.sh
-# pattern). Synchronous — caller MUST wait for this to return.
+# Calls the configured model CLI (see _model.sh; defaults to Claude Haiku 4.5
+# via the `claude` CLI in print mode, matching reflect.sh). Synchronous: caller
+# MUST wait for this to return.
 #
 # Exit codes:
 #   0  success
@@ -35,6 +36,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=_log.sh
 source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+# shellcheck source=_model.sh
+source "$SCRIPT_DIR/_model.sh"
 
 export BRAIN_COMPONENT="compress-era.sh"
 
@@ -155,7 +158,7 @@ ${material}
 Return ONLY the new consolidated era summary. No preamble, no explanation."
 
     export BRAIN_ONE_SHOT_SESSION=1
-    if ! echo "$prompt" | claude --print --no-session-persistence --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" > "$FUSE_OUT" 2>/dev/null; then
+    if ! echo "$prompt" | brain_model_call 1 "$SYSTEM_PROMPT" > "$FUSE_OUT"; then
         return 3
     fi
     [ -s "$FUSE_OUT" ] || return 3
@@ -186,7 +189,7 @@ while [ "$OFFSET" -lt "$TOTAL" ]; do
         echo "  batch $BATCH_NUM: folding ${#BATCH[@]} reflection(s) (offset $OFFSET/$TOTAL)…" >&2
     fi
     if ! fuse_batch "$ACCUM" "${BATCH[@]}"; then
-        echo "Error: claude CLI failed on batch $BATCH_NUM, leaving era-summary.md unchanged" >&2
+        echo "Error: model CLI failed on batch $BATCH_NUM, leaving era-summary.md unchanged" >&2
         exit 3
     fi
     ACCUM="$(cat "$FUSE_OUT")"
@@ -235,7 +238,7 @@ if [ "$CAP_BYTES" -gt "$ERA_SUMMARY_MAX_BYTES" ]; then
             CAP_TMP="$(mktemp)"
 
             set +e
-            cat "$BEST_OUT" | claude --print --no-session-persistence --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$CAP_SYSTEM_PROMPT" > "$CAP_TMP" 2>/dev/null
+            cat "$BEST_OUT" | brain_model_call 1 "$CAP_SYSTEM_PROMPT" > "$CAP_TMP"
             CLAUDE_EXIT=$?
             set -e
 

@@ -1,15 +1,16 @@
-# Adjust %h/the-brain below if your checkout lives elsewhere; systemd cannot
-# resolve the path itself. scripts/install-timer.sh symlinks this unit into
-# ~/.config/systemd/user/.
+# Daily Qdrant maintenance: systemd user service TEMPLATE.
+#
+# Do not copy this by hand: scripts/install-timer.sh fills in the placeholders with
+# the checkout path, so the checkout can live anywhere and have any name.
 [Unit]
 Description=Daily Qdrant maintenance — snapshot + drift check + auto-reindex
-Documentation=file://%h/the-brain/README.md
+Documentation=file://@BRAIN_ROOT@/README.md
 Wants=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/the-brain/scripts/snapshot-qdrant.sh
+ExecStart=@BRAIN_ROOT@/scripts/snapshot-qdrant.sh
 # Redirect output to journal — view with `journalctl --user -u snapshot-qdrant`
 StandardOutput=journal
 StandardError=journal

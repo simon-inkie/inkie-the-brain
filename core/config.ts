@@ -186,6 +186,17 @@ function parseScoreWeight(raw: string | undefined, fallback: number, envName: st
   return value;
 }
 
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.warn(`[config] ignoring ${name}="${raw}": not a positive integer, using ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 export const config = {
   // QDRANT_URL env override — defaults to local Docker Qdrant on 6333.
   // Documented in QUICKSTART for Qdrant Cloud users (Path C escape hatch)
@@ -193,8 +204,13 @@ export const config = {
   qdrantUrl: process.env.QDRANT_URL || "http://localhost:6333",
   qdrantApiKey: process.env.QDRANT_API_KEY || "",
 
+  // Gemini model used by the default provider and by asset embedding. Other
+  // providers and a Gemini model override are chosen with EMBED_PROVIDER and
+  // EMBED_MODEL; see core/embedder/provider.ts.
   embeddingModel: "gemini-embedding-2-preview",
-  embeddingDimensions: 768,
+  // Vector size for every collection. Must match the model in use. Changing it
+  // needs a fresh collection, because Qdrant fixes the size at creation.
+  embeddingDimensions: positiveIntFromEnv("EMBED_DIMENSIONS", 768),
 
   collections: {
     brain: "brain-vault",
