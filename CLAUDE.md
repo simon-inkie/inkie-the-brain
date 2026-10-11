@@ -2,10 +2,15 @@
 
 Long-term memory for AI coding agents. Filesystem-first, runtime-agnostic.
 
-## Git workflow
+## Shared rules
 
-Branch off `main` for every change, open a pull request, do not push directly to `main`. This applies to every contributor, human or agent.
+This file is a pointer. The rules for every agent runtime are in
+[AGENTS.md](AGENTS.md), imported below, and the workflow is in
+[DEVELOPMENT.md](DEVELOPMENT.md); read both before your first change. There is
+exactly one copy of the rules, so nothing here can drift.
 
-- Branch names: short, descriptive, kebab-case.
-- Keep PRs scoped to one change; large or unrelated changes go in separate PRs.
-- `main` should always be in a releasable state.
+@AGENTS.md
+
+The `start-issue` skill lives once in `.agents/skills/start-issue/` and is
+reachable from Claude Code through the `.claude/skills/start-issue` symlink.
+Edit the canonical copy, not the link.
