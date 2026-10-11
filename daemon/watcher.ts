@@ -10,6 +10,7 @@ import { ensureCollections, getCollectionPointCount } from "../core/qdrant/clien
 import { relative } from "path";
 import { startMediaFilerWatcher } from "../core/media-filer/index.js";
 import { startPokeAgyWatcher } from "../core/poke-agy/index.js";
+import { parseWatchExtras } from "../core/watch-extras.js";
 import { crossLinkFile } from "../core/cross-linker/index.js";
 import { detectCollection } from "../core/indexer/collection-router.js";
 import { resetTickCounter } from "../core/embedder/gate.js";
@@ -325,11 +326,23 @@ async function main(): Promise<void> {
     log(`Watcher error: ${msg}`);
   });
 
-  // Start media filer — watches ~/.openclaw/media/inbound/ and copies to brain/assets/
-  startMediaFilerWatcher(log);
+  // Optional watchers, opt-in via BRAIN_WATCH_EXTRAS (see core/watch-extras.ts).
+  const extras = parseWatchExtras(process.env.BRAIN_WATCH_EXTRAS);
+  for (const u of extras.unknown) {
+    log(`Ignoring unknown BRAIN_WATCH_EXTRAS entry "${u}" (expected media-filer, poke-agy or all)`);
+  }
 
-  // Start poke-agy — watches agy-runtime agents' inboxes and tmux-wakes them on a new DM
-  startPokeAgyWatcher(log);
+  // Media filer: watches ~/.openclaw/media/inbound/ and copies to brain/assets/
+  if (extras.enabled.has("media-filer")) startMediaFilerWatcher(log);
+
+  // poke-agy: watches agy-runtime agents' inboxes and tmux-wakes them on a new DM
+  if (extras.enabled.has("poke-agy")) startPokeAgyWatcher(log);
+
+  log(
+    extras.enabled.size > 0
+      ? `Extra watchers: ${[...extras.enabled].join(", ")}`
+      : "Extra watchers: none (set BRAIN_WATCH_EXTRAS to enable media-filer and/or poke-agy)",
+  );
 
   log("Watcher running. Press Ctrl+C to stop.");
 

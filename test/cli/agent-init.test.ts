@@ -81,13 +81,44 @@ describe("agent init", () => {
     expect(typeof live).toBe("object");
   });
 
-  it("refuses to overwrite an existing agent dir", () => {
+  it("is idempotent: a second run exits 0 and leaves existing files alone", () => {
     const first = runCli(["agent", "init", "dup-agent"], fakeHome);
     expect(first.status).toBe(0);
 
+    const obs = join(
+      fakeHome, ".the-brain", "agents", "dup-agent", "memory", "observer-state.json",
+    );
+    writeFileSync(obs, '{"unprocessedObservationCount":3}\n');
+
     const second = runCli(["agent", "init", "dup-agent"], fakeHome);
-    expect(second.status).toBe(1);
-    expect(second.stderr).toMatch(/already exists/i);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toMatch(/already in place/i);
+    expect(readFileSync(obs, "utf-8")).toContain("unprocessedObservationCount");
+  });
+
+  it("restores a missing seed file on re-run without touching the rest", () => {
+    runCli(["agent", "init", "fix-agent"], fakeHome);
+    const memory = join(fakeHome, ".the-brain", "agents", "fix-agent", "memory");
+    rmSync(join(memory, "prompts", "compress-era-cap.md"));
+    const r = runCli(["agent", "init", "fix-agent"], fakeHome);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/restored missing files/i);
+    expect(existsSync(join(memory, "prompts", "compress-era-cap.md"))).toBe(true);
+  });
+
+  it("never reads stdin: runs to completion with stdin closed", () => {
+    const result = spawnSync("npx", ["tsx", cliPath, "agent", "init", "no-tty"], {
+      env: { ...process.env, HOME: fakeHome },
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(result.status).toBe(0);
+  });
+
+  it("refuses an unknown flag with exit 1", () => {
+    const r = runCli(["agent", "init", "flag-agent", "--bogus"], fakeHome);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/unknown argument/i);
   });
 
   it("refuses an invalid name", () => {
@@ -137,10 +168,37 @@ describe("agent init", () => {
       ],
       fakeHome,
     );
-    // The agent dir IS created before --link is validated (acceptable
-    // behaviour — the silo is useful on its own). The CLI then exits 1
-    // because the link target is missing.
+    // --link is validated before anything is created, so a failed call
+    // leaves no half-made silo behind.
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/does not exist/i);
+    expect(
+      existsSync(join(fakeHome, ".the-brain", "agents", "nolink-agent")),
+    ).toBe(false);
+  });
+
+  it("re-linking the same silo is a no-op with exit 0", () => {
+    const linkDir = join(fakeHome, "wt");
+    mkdirSync(linkDir, { recursive: true });
+    expect(runCli(["agent", "init", "a1", "--link", linkDir], fakeHome).status).toBe(0);
+    const again = runCli(["agent", "init", "a1", "--link", linkDir], fakeHome);
+    expect(again.status).toBe(0);
+    expect(again.stdout).toMatch(/already points/i);
+  });
+
+  it("exits 3 when --link already points at another silo, and --relink repoints it", () => {
+    const linkDir = join(fakeHome, "wt");
+    mkdirSync(linkDir, { recursive: true });
+    runCli(["agent", "init", "first", "--link", linkDir], fakeHome);
+
+    const clash = runCli(["agent", "init", "second", "--link", linkDir], fakeHome);
+    expect(clash.status).toBe(3);
+    expect(clash.stderr).toMatch(/--relink/);
+
+    const forced = runCli(["agent", "init", "second", "--link", linkDir, "--relink"], fakeHome);
+    expect(forced.status).toBe(0);
+    expect(readFileSync(join(linkDir, ".the-brain", "memory_root"), "utf-8").trim()).toBe(
+      join(fakeHome, ".the-brain", "agents", "second", "memory"),
+    );
   });
 });

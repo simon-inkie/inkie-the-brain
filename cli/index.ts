@@ -1,7 +1,7 @@
 import "../core/env.js";
 import { resolve, join, dirname } from "path";
 import { homedir } from "os";
-import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { config } from "../core/config.js";
 import { indexAll, indexFile } from "../core/indexer/files.js";
@@ -244,10 +244,17 @@ async function runAssets() {
   console.log(`\n${assets.length} assets indexed.`);
 }
 
+// Exit codes for `agent init`, stable for scripts that call it:
+//   0  done: created, repaired or already in place (safe to re-run)
+//   1  bad arguments (missing or invalid name, unknown flag, --link dir absent)
+//   2  environment problem (a template is missing, or a path is not writable)
+//   3  conflict: --link target already points at a different silo (use --relink)
+// It never prompts.
 function runAgentInit() {
+  const usage = "Usage: tsx cli/index.ts agent init <name> [--link <dir>] [--relink]";
   const sub = args[1];
   if (sub !== "init") {
-    console.error('Usage: tsx cli/index.ts agent init <name> [--link <dir>]');
+    console.error(usage);
     process.exit(1);
   }
 
@@ -263,86 +270,126 @@ function runAgentInit() {
     process.exit(1);
   }
 
-  const linkFlag = args.indexOf("--link");
-  const linkDir =
-    linkFlag !== -1 && args[linkFlag + 1]
-      ? resolve(args[linkFlag + 1])
-      : undefined;
+  let linkDir: string | undefined;
+  let relink = false;
+  const rest = args.slice(3);
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === "--link") {
+      if (!rest[i + 1] || rest[i + 1].startsWith("--")) {
+        console.error("agent init: --link needs a directory");
+        process.exit(1);
+      }
+      linkDir = resolve(rest[++i]);
+    } else if (rest[i] === "--relink") {
+      relink = true;
+    } else {
+      console.error(`agent init: unknown argument ${rest[i]}\n${usage}`);
+      process.exit(1);
+    }
+  }
+  // Validate before creating anything, so a failed call leaves no half-made silo.
+  if (linkDir && !existsSync(linkDir)) {
+    console.error(`--link: dir ${linkDir} does not exist`);
+    process.exit(1);
+  }
 
   // repoRoot = two levels up from cli/index.ts
   const here = fileURLToPath(import.meta.url);
   const repoRoot = resolve(dirname(here), "..");
   const templatesDir = join(repoRoot, "templates");
-  for (const f of ["OBSERVATION-PROMPT.md", "live-state.json", "MEMORY.md"]) {
+  const promptFiles = [
+    ...["0", "1", "2", "3"].map((l) => `compress-era-level-${l}.md`),
+    "compress-era-cap.md",
+  ];
+  for (const f of [
+    "OBSERVATION-PROMPT.md",
+    "live-state.json",
+    "MEMORY.md",
+    ...promptFiles.map((p) => join("prompts", p)),
+  ]) {
     if (!existsSync(join(templatesDir, f))) {
       console.error(`agent init: template missing at ${join(templatesDir, f)}`);
-      process.exit(1);
+      process.exit(2);
     }
   }
 
   const agentDir = join(homedir(), ".the-brain", "agents", name);
   const memoryDir = join(agentDir, "memory");
-  if (existsSync(memoryDir)) {
-    console.error(
-      `agent init: ${memoryDir} already exists — refusing to overwrite`,
-    );
-    process.exit(1);
+  const existed = existsSync(memoryDir);
+  const added: string[] = [];
+
+  // Create-if-missing, never overwrite: re-running repairs a partial silo and
+  // leaves a live one (with real observations and edited prompts) untouched.
+  const seed = (from: string | null, to: string, contents = "") => {
+    if (existsSync(to)) return;
+    if (from) copyFileSync(from, to);
+    else writeFileSync(to, contents);
+    added.push(to.slice(agentDir.length + 1));
+  };
+
+  try {
+    for (const d of ["observations", "observer-pointers", "prompts"]) {
+      mkdirSync(join(memoryDir, d), { recursive: true });
+    }
+    seed(join(templatesDir, "OBSERVATION-PROMPT.md"), join(memoryDir, "OBSERVATION-PROMPT.md"));
+    seed(join(templatesDir, "live-state.json"), join(memoryDir, "live-state.json"));
+    seed(join(templatesDir, "MEMORY.md"), join(agentDir, "MEMORY.md"));
+    for (const f of promptFiles) {
+      seed(join(templatesDir, "prompts", f), join(memoryDir, "prompts", f));
+    }
+    seed(null, join(memoryDir, "observer-state.json"), "{}\n");
+  } catch (e) {
+    console.error(`agent init: cannot write ${agentDir}: ${(e as Error).message}`);
+    process.exit(2);
   }
 
-  mkdirSync(join(memoryDir, "observations"), { recursive: true });
-  mkdirSync(join(memoryDir, "observer-pointers"), { recursive: true });
-  mkdirSync(join(memoryDir, "prompts"), { recursive: true });
-  copyFileSync(
-    join(templatesDir, "OBSERVATION-PROMPT.md"),
-    join(memoryDir, "OBSERVATION-PROMPT.md"),
-  );
-  copyFileSync(
-    join(templatesDir, "live-state.json"),
-    join(memoryDir, "live-state.json"),
-  );
-  copyFileSync(join(templatesDir, "MEMORY.md"), join(agentDir, "MEMORY.md"));
-  for (const lvl of ["0", "1", "2", "3"]) {
-    copyFileSync(
-      join(templatesDir, "prompts", `compress-era-level-${lvl}.md`),
-      join(memoryDir, "prompts", `compress-era-level-${lvl}.md`),
-    );
+  if (!existed) {
+    console.log(`✅ Created agent dir: ${agentDir}`);
+    console.log(`   memory/OBSERVATION-PROMPT.md  (observation contract)`);
+    console.log(`   memory/live-state.json        (era-compression state)`);
+    console.log(`   memory/observer-state.json    (bootstrap state)`);
+    console.log(`   memory/observations/          (empty)`);
+    console.log(`   memory/observer-pointers/     (empty)`);
+    console.log(`   memory/prompts/               (era-compression prompt set)`);
+    console.log(`   MEMORY.md                     (live-block template)`);
+  } else if (added.length > 0) {
+    console.log(`✅ Agent dir already existed, restored missing files: ${agentDir}`);
+    for (const f of added) console.log(`   ${f}`);
+  } else {
+    console.log(`✅ Agent dir already in place, nothing to change: ${agentDir}`);
   }
-  copyFileSync(
-    join(templatesDir, "prompts", "compress-era-cap.md"),
-    join(memoryDir, "prompts", "compress-era-cap.md"),
-  );
-  writeFileSync(join(memoryDir, "observer-state.json"), "{}\n");
-
-  console.log(`✅ Created agent dir: ${agentDir}`);
-  console.log(`   memory/OBSERVATION-PROMPT.md  (observation contract)`);
-  console.log(`   memory/live-state.json        (era-compression state)`);
-  console.log(`   memory/observer-state.json    (bootstrap state)`);
-  console.log(`   memory/observations/          (empty)`);
-  console.log(`   memory/observer-pointers/     (empty)`);
-  console.log(`   memory/prompts/               (era-compression prompt set)`);
-  console.log(`   MEMORY.md                     (live-block template)`);
 
   if (linkDir) {
-    if (!existsSync(linkDir)) {
-      console.error(`--link: dir ${linkDir} does not exist`);
-      process.exit(1);
-    }
     const pointerDir = join(linkDir, ".the-brain");
-    mkdirSync(pointerDir, { recursive: true });
-    writeFileSync(join(pointerDir, "memory_root"), memoryDir + "\n");
-    console.log(
-      `✅ Linked ${linkDir}/.the-brain/memory_root → ${memoryDir}`,
-    );
-    console.log(`   Add ".the-brain/" to ${linkDir}/.gitignore to keep the pointer local.`);
-  } else {
+    const pointer = join(pointerDir, "memory_root");
+    const current = existsSync(pointer)
+      ? readFileSync(pointer, "utf-8").split("\n")[0].trim()
+      : null;
+    if (current === memoryDir) {
+      console.log(`✅ ${pointer} already points at ${memoryDir}`);
+    } else if (current && !relink) {
+      console.error(
+        `agent init: ${pointer} already points at ${current}; pass --relink to repoint it at ${memoryDir}`,
+      );
+      process.exit(3);
+    } else {
+      try {
+        mkdirSync(pointerDir, { recursive: true });
+        writeFileSync(pointer, memoryDir + "\n");
+      } catch (e) {
+        console.error(`agent init: cannot write ${pointer}: ${(e as Error).message}`);
+        process.exit(2);
+      }
+      console.log(`✅ Linked ${linkDir}/.the-brain/memory_root → ${memoryDir}`);
+      console.log(`   Add ".the-brain/" to ${linkDir}/.gitignore to keep the pointer local.`);
+    }
+  } else if (!existed) {
     console.log();
     console.log(`Next: link a worktree by running in it:`);
     console.log(
       `   tsx ${repoRoot}/cli/index.ts agent init ${name} --link .`,
     );
-    console.log(
-      `(safe to re-run; already-created dirs are refused, but --link can be added.)`,
-    );
+    console.log(`(safe to re-run: existing files are never overwritten.)`);
   }
 }
 
@@ -386,7 +433,7 @@ async function main() {
       console.error("  context <timestamp>         Show messages around a timestamp");
       console.error("  index-assets [--file <path>] Index images, PDFs, and audio");
       console.error("  assets                      List all indexed assets");
-      console.error("  agent init <name> [--link <dir>]  Create a new agent memory silo");
+      console.error("  agent init <name> [--link <dir>] [--relink]  Create or repair an agent memory silo (scriptable, idempotent)");
       process.exit(1);
   }
 }

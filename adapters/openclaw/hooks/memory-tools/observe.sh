@@ -14,6 +14,8 @@ export PATH="$HOME/.local/bin:$PATH"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=_log.sh
 source "$SCRIPT_DIR/_log.sh" 2>/dev/null || true
+# shellcheck source=_model.sh
+source "$SCRIPT_DIR/_model.sh"
 
 MEMORY_DIR="${MEMORY_DIR:-$(dirname "$SCRIPT_DIR")}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$(dirname "$MEMORY_DIR")}"
@@ -53,7 +55,7 @@ fi
 
 # Extract system prompt from OBSERVATION-PROMPT.md
 # The system prompt is between the first pair of triple backticks in the "## System Prompt" section
-SYSTEM_PROMPT=$(sed -n '/^## System Prompt/,/^## User Prompt/{ /^```$/,/^```$/{ /^```$/d; p; } }' "$PROMPT_FILE" | head -n -0)
+SYSTEM_PROMPT=$(sed -n '/^## System Prompt/,/^## User Prompt/{ /^```$/,/^```$/{ /^```$/d; p; }; }' "$PROMPT_FILE")
 
 # If extraction failed, use a simpler approach
 if [ -z "$SYSTEM_PROMPT" ]; then
@@ -86,19 +88,19 @@ $CONVERSATION
 
 Output your observations using the XML format specified. Include <observations>, <current-task>, and <suggested-response>."
 
-# Call Claude with the observation prompt
-# Uses claude CLI in print mode with a fast model
+# Call the configured model CLI with the observation prompt (see _model.sh:
+# BRAIN_MODEL_CLI / BRAIN_MODEL_ID; defaults to claude + a fast model)
 # Signal to SessionStart hooks that this is a one-shot model call, not an
 # interactive session: persona-inject.sh and obs-inject.sh both gate on this
 # flag and emit nothing, so the call stays lean and cannot recurse.
 export BRAIN_ONE_SHOT_SESSION=1
 echo "🔬 Running observation pass..."
-log info "claude-call-start" "{\"model\":\"claude-haiku-4-5-20251001\",\"promptChars\":${#FULL_PROMPT}}"
-RESULT=$(echo "$FULL_PROMPT" | claude --print --strict-mcp-config --model claude-haiku-4-5-20251001 --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
+log info "claude-call-start" "{\"cli\":\"$BRAIN_MODEL_CLI_LOG\",\"model\":\"$BRAIN_MODEL_ID_LOG\",\"promptChars\":${#FULL_PROMPT}}"
+RESULT=$(echo "$FULL_PROMPT" | brain_model_call 0 "$SYSTEM_PROMPT" || true)
 
 if [ -z "$RESULT" ]; then
     log error "claude-call-failed" "{\"reason\":\"empty-result\"}"
-    echo "Error: Claude returned empty result"
+    echo "Error: model CLI ($BRAIN_MODEL_CLI) returned empty result"
     exit 1
 fi
 log info "claude-call-ok" "{\"resultChars\":${#RESULT}}"

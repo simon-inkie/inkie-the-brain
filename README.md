@@ -2,7 +2,7 @@
 
 > Long-term memory for AI coding agents. Survives compaction. Searchable across sessions. Filesystem-first.
 
-**Status:** v0.3.0. Adapters for Claude Code, Antigravity (agy) and OpenClaw all ship. Built around Qdrant, Gemini embeddings and a hook-driven observation pipeline.
+**Status:** v0.3.0. Adapters for Claude Code, Antigravity (agy) and OpenClaw all ship. Built around Qdrant, a pluggable embeddings provider (Gemini by default) and a hook-driven observation pipeline.
 
 > **Looking for the design intuition?** See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md), which explains why this matters and how the pieces fit together.
 
@@ -28,6 +28,19 @@ Got Claude Code, Cursor, or another agentic AI? Paste this prompt to it:
 
 ---
 
+## What needs what
+
+Two layers, with different requirements. Nothing in the memory loop needs an embeddings key.
+
+| Layer | What it does | Needs |
+|---|---|---|
+| **Memory loop** (M1) | Observes, reflects, compresses eras and injects the memory block. Files on disk. | Only the model CLI your host already has (by default `claude`). No API key from this project; it runs on your existing model CLI and its plan (a Haiku-class call per observation, reflection and era compression). |
+| **Semantic search** (M2) | Indexes into Qdrant and answers `remembering` / `pnpm run search`. | Qdrant, plus an embeddings provider. The default is a Google Gemini API key (free tier works); a local offline model works too, see [Embeddings provider](#embeddings-provider). |
+
+`EMBED_DRY_RUN=true` runs the embedder with no key at all, which is the keyless way to check an install.
+
+---
+
 ## What this does
 
 Claude Code, and every other long-running agent, eventually compacts your conversation. When it does, you lose:
@@ -46,7 +59,7 @@ The brain captures all of that to disk *before* compaction destroys it, and re-i
 - **Indexer**: embeds observations, reflections, references, brain vault files, conversation transcripts and multimodal assets into Qdrant
 - **Embedder + spend gate**: one shared gate governs every embedding call, with a dry-run mode, a per-tick kill switch and a daily spend ledger
 - **MCP server**: exposes the `remembering` tool to any MCP-aware client (Claude Code, Cursor, etc.) for semantic recall
-- **Daemon**: file watcher for live re-index when content changes
+- **Daemon**: file watcher for live re-index when content changes. The media filer and `poke-agy` watchers are opt-in (`BRAIN_WATCH_EXTRAS`)
 
 ### Observation is compaction-driven
 
@@ -77,12 +90,13 @@ cd inkie-the-brain
 pnpm install
 pnpm build
 
-# 3. Set Gemini API key (Google AI Studio, free tier works)
+# 3. Semantic search only: set an embeddings key (Google AI Studio, free tier works).
+#    Skip this for the memory loop alone, or to use a local model (see below).
 mkdir -p ~/.the-brain
 echo 'GEMINI_API_KEY=your-key-here' >> ~/.the-brain/.env
 
-# 4. Wire the Claude Code hooks (full config in QUICKSTART.md)
-# Edit ~/.claude/settings.json, add UserPromptSubmit, Stop, PreCompact
+# 4. Wire the Claude Code hooks into ~/.claude/settings.json (idempotent, no prompts)
+scripts/install.sh --skip-build
 
 # 5. First index
 pnpm index
@@ -90,6 +104,8 @@ pnpm index
 # 6. Verify
 pnpm run search "your query"
 ```
+
+Steps 2 and 4 are one command in `scripts/install.sh`; see [Scripting the install](#scripting-the-install).
 
 > **`pnpm run search`, not `pnpm search`.** pnpm ships a built-in `search` command that queries the npm registry, and a built-in beats a `package.json` script of the same name. `pnpm search "octopus"` will return npm packages and no error. Every other script in this repo (`index`, `build`, `stats`, `watch`, `agent`, ...) has no such collision and works either way.
 
@@ -207,7 +223,18 @@ The brain reads `~/.the-brain/.env` at startup, because hooks run in a sandboxed
 
 | Variable | Default | What it does |
 |---|---|---|
-| `GEMINI_API_KEY` | none | Embeddings and the observation LLM. Required. |
+| `GEMINI_API_KEY` | none | Semantic search only, with the default `gemini` embeddings provider. The memory loop does not use it. |
+| `BRAIN_MODEL_CLI` | `claude` | CLI the memory loop (`observe.sh`, `reflect.sh`, `compress-era.sh`) calls. Reads the prompt on stdin, writes the answer to stdout. May carry leading words (`npx my-llm`). |
+| `BRAIN_MODEL_ID` | `claude-haiku-4-5-20251001` | Model id passed to that CLI. Set it empty to pass no model flag. |
+| `BRAIN_MODEL_ARGS` | `--print --strict-mcp-config` (plus `--no-session-persistence` for reflect and compress-era) | Fixed arguments before the model flag. Set it when the CLI is not `claude`. |
+| `BRAIN_MODEL_FLAG`, `BRAIN_MODEL_SYSTEM_FLAG` | `--model`, `--system-prompt` | The flags that carry the model id and the system prompt. |
+| `EMBED_PROVIDER` | `gemini` | `gemini` or `openai` (any OpenAI-compatible endpoint, including local servers). See [Embeddings provider](#embeddings-provider). |
+| `EMBED_MODEL` | provider default | Embedding model. Required for `openai`. |
+| `EMBED_DIMENSIONS` | `768` | Vector size of every collection. Must match the model. |
+| `EMBED_BASE_URL`, `EMBED_API_KEY` | `http://localhost:11434/v1`, none | `openai` provider only. The key is optional for a local server. |
+| `EMBED_QUERY_PREFIX`, `EMBED_DOCUMENT_PREFIX` | empty | `openai` provider only. Task prefixes some local models expect. |
+| `EMBED_SEND_DIMENSIONS` | unset | `true` sends `dimensions` to servers that can truncate. |
+| `BRAIN_WATCH_EXTRAS` | none | Extra watchers `pnpm watch` starts: `media-filer`, `poke-agy`, or `all`. |
 | `BRAIN_ENV_FILE` | unset | Explicit path to the env file, ahead of both default locations. |
 | `QDRANT_URL` | `http://localhost:6333` | Point at Qdrant Cloud or a non-default port. |
 | `QDRANT_API_KEY` | empty | Required by Qdrant Cloud. |
@@ -218,7 +245,7 @@ The brain reads `~/.the-brain/.env` at startup, because hooks run in a sandboxed
 | `BRAIN_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` for `~/.the-brain/logs/hook-activity.jsonl`. |
 | `BRAIN_DEBUG` | unset | `1` makes the Claude Code hook handlers print their decision to stderr. |
 | `BRAIN_OBS_VIA_SESSIONSTART` | unset | `1` moves the observation block from the per-turn hook to the cached `SessionStart` prefix. |
-| `EMBED_DRY_RUN` | `false` | `true` returns zero-vectors, makes no Gemini calls and skips Qdrant mutations. Use it to watch indexer behaviour without spending. |
+| `EMBED_DRY_RUN` | `false` | `true` returns zero-vectors, makes no embedding calls (so needs no key) and skips Qdrant mutations. Use it to watch indexer behaviour without spending. Index and search commands still need a reachable Qdrant. |
 | `MAX_EMBEDS_PER_TICK` | `5000` | Hard kill switch, shared across text, image, PDF and audio paths. Exceeding it halts the tick loudly instead of bleeding cost quietly. |
 | `EMBED_DAILY_BUDGET_USD` | `5` | Soft daily threshold in USD. Crossing it warns once per process per day; it does not halt. |
 | `EMBED_DAILY_HARD_CAP_USD` | `20` | Hard daily threshold in USD. Crossing it halts the tick. |
@@ -232,12 +259,82 @@ The brain reads `~/.the-brain/.env` at startup, because hooks run in a sandboxed
 
 ---
 
+## Embeddings provider
+
+Semantic search embeds text through one seam, `core/embedder/provider.ts`, chosen by environment variables with no code edit. The memory loop does not use it.
+
+| Provider | Set | Notes |
+|---|---|---|
+| `gemini` (default) | `GEMINI_API_KEY` | Optional `EMBED_MODEL` override. |
+| `openai` | `EMBED_PROVIDER=openai`, `EMBED_MODEL`, optionally `EMBED_BASE_URL` and `EMBED_API_KEY` | Any server exposing `POST {EMBED_BASE_URL}/embeddings`: Ollama, llama.cpp, LM Studio, vLLM or a hosted service. |
+
+A local, offline model, for example with Ollama, in `~/.the-brain/.env`:
+
+```bash
+EMBED_PROVIDER=openai
+EMBED_MODEL=nomic-embed-text
+EMBED_DIMENSIONS=768
+EMBED_QUERY_PREFIX=search_query:
+EMBED_DOCUMENT_PREFIX=search_document:
+```
+
+(after `ollama pull nomic-embed-text`).
+
+Notes:
+
+- **Dimensions are fixed per collection.** `EMBED_DIMENSIONS` must equal the model's output size. A wrong size fails loudly on the first call. Switching provider or model on an install that already has collections needs a fresh set: the old vectors are not comparable, and Qdrant fixes the size at creation.
+- **Images, PDFs and audio stay Gemini-only.** Text, observations, reflections and transcripts go through the seam; the asset pipeline (`core/embedder/assets.ts`) still needs `GEMINI_API_KEY`.
+- **Spend tracking is Gemini's.** Only the `gemini` provider is priced by the ledger; a hosted `openai` provider is not priced or capped by dollar amount, only by the per-tick kill switch. The per-tick kill switch applies to every provider.
+
+---
+
+## Scripting the install
+
+For a downstream install (another project's setup script, a dependency checkout under any name), everything below is non-interactive and idempotent. Every path is derived from the checkout's own location.
+
+```bash
+scripts/install.sh --settings ~/.claude/settings.json --agent my-agent --link /path/to/worktree
+```
+
+It runs `pnpm install --frozen-lockfile` and `pnpm build` (skip with `--skip-build`), merges the hooks, then creates or repairs the silo. `--dry-run` reports the hook changes and writes nothing.
+
+**Hook merge** (`scripts/install-hooks.mjs`). Adds `UserPromptSubmit`, `Stop` and `PreCompact` (`auto` and `manual`) to the target `settings.json`. Other settings and other hooks, including other hooks on the same event, are left alone. An entry from an earlier install is recognised by the tail of its command (`claude-code/bin/<script>.sh`), so a moved or renamed checkout has its path rewritten rather than duplicated. The original file is kept once as `settings.json.the-brain.bak`. A file that is not valid JSON is never written.
+
+**`agent init <name> [--link DIR] [--relink]`.** Never prompts and is safe to re-run: existing files are left alone, missing seed files are restored.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Done: created, repaired or already in place |
+| 1 | Bad arguments (missing or invalid name, unknown flag, `--link` directory absent) |
+| 2 | Environment problem (a template is missing, a path is not writable) |
+| 3 | `--link` already points at a different silo; pass `--relink` to repoint it |
+
+`scripts/install.sh` exits 0 on success, 1 on bad arguments, 2 when Node, pnpm or the build is missing or fails, 3 when `settings.json` is unusable, and passes an `agent init` failure through unchanged.
+
+**Services.** `scripts/install-watcher.sh` and `scripts/install-timer.sh` take `--root DIR` and render their systemd user units with that path.
+
+**Telling the agent how to use memory.** [`templates/RECALL-INSTRUCTIONS.md`](./templates/RECALL-INSTRUCTIONS.md) is a runtime-neutral block (when to search, how to call search, where durable notes go) to paste into `AGENTS.md`, `CLAUDE.md` or any system prompt.
+
+### Using a different model CLI
+
+The memory loop shells out to one CLI, configured in `~/.the-brain/.env` or the environment (the environment wins):
+
+```bash
+BRAIN_MODEL_CLI=claude                       # the default
+BRAIN_MODEL_ID=claude-haiku-4-5-20251001     # the default
+```
+
+For a CLI with other flags, set `BRAIN_MODEL_ARGS`, `BRAIN_MODEL_FLAG` and `BRAIN_MODEL_SYSTEM_FLAG` too. The CLI must read the prompt on stdin and write the answer to stdout. The loop passes it no key; the CLI authenticates itself.
+
+---
+
 ## Operations
 
 - **Health check.** `scripts/health-check.sh` reports on Qdrant, the collections, the systemd units, every agent silo and recent watcher activity. It **discovers** silos by listing `~/.the-brain/agents/*/` rather than reading a roster, so it needs no edit when you add an agent. Container and unit names are overridable with `QDRANT_CONTAINER` and `WATCHER_UNIT`.
 - **Blue-green transcript rebuilds.** To rebuild the messages collection without downtime: index into a fresh collection with `BRAIN_MESSAGES_COLLECTION=io-messages-v2` and `BRAIN_MESSAGE_INDEX_STATE` pointing somewhere new, then cut over with `scripts/blue-green-swap.sh --new io-messages-v2`. The script is verify-before-destroy: it refuses to drop the old collection unless the new one exists and clears a minimum point count, and without `--confirm` it is a dry run that changes nothing. Always dry-run first.
-- **Snapshots.** `scripts/snapshot-qdrant.sh` plus the matching systemd `.service` and `.timer` units. The unit files use `%h` for the home directory but still assume a checkout at `%h/the-brain`; adjust the path if yours lives elsewhere.
-- **Daemon.** `pnpm watch` runs the file watcher for live re-indexing. It also starts the `poke-agy` watcher, which wakes dormant agy-runtime agents in tmux when a new inbox message arrives. That watcher only considers agents whose `.runtime` file reads `agy`, and it expects the tmux session to be named `agents`. On any other session name it finds no window and silently does nothing.
+- **Snapshots.** `scripts/snapshot-qdrant.sh` plus the matching systemd `.service` and `.timer` units. `scripts/install-timer.sh [--root DIR]` renders the units with your checkout's path, so the checkout can have any name and live anywhere.
+- **Daemon.** `pnpm watch` runs the file watcher for live re-indexing. Two further watchers are opt-in through `BRAIN_WATCH_EXTRAS` (a comma list, or `all`): `media-filer` (OpenClaw inbound media) and `poke-agy`. Neither starts by default. `poke-agy` wakes dormant agy-runtime agents in tmux when a new inbox message arrives; it only considers agents whose `.runtime` file reads `agy`, and it expects the tmux session to be named `agents`. On any other session name it finds no window and silently does nothing.
+- **Watcher as a service.** `scripts/install-watcher.sh [--root DIR] [--extras LIST]` writes a systemd user unit for a checkout at any path and enables it. Extras are off unless named.
 - **Gates.** `pnpm check:leaks`, `pnpm check:leaks:self-test` and `pnpm check:licence` guard the published surface. The self-test proves every rule still fires; run it whenever you touch the rule set.
 
 ---

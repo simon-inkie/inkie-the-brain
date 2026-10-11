@@ -11,9 +11,9 @@ Guide the user through setting up a dedicated agent memory silo for the current 
 
 Run these checks silently. Surface the first one that fails; skip the skill's main flow until the user fixes it.
 
-1. **the-brain repo checked out.** Expected at `~/the-brain/` unless the user says otherwise. If missing, tell the user to clone `https://github.com/simon-inkie/inkie-the-brain.git` first. Use their actual checkout path in the steps below.
+1. **the-brain repo checked out.** Find it rather than assuming a name: it is the directory holding `cli/index.ts` and `scripts/install.sh`. Check `$BRAIN_ROOT` if set, the current directory and its parents, then the directory a `the-brain` command on `PATH` resolves into (`readlink -f "$(command -v the-brain)"`, two levels up). If none is found, ask the user for the path or tell them to clone `https://github.com/simon-inkie/inkie-the-brain.git` first. Use that path, whatever the directory is called, wherever `<repo>` appears below.
 2. **Build exists.** Expected `<repo>/dist/claude-code/bin/user-prompt-submit.sh`. If missing, run `cd <repo> && pnpm install && node scripts/build.mjs` for them.
-3. **Hooks wired into ~/.claude/settings.json.** Grep for `the-brain/dist/claude-code/bin/user-prompt-submit.sh` in `~/.claude/settings.json`. If missing, tell the user the permanent install hasn't been done yet — that's a separate one-time step (see the repo's README) and NOT part of this skill.
+3. **Hooks wired into ~/.claude/settings.json.** Grep for `claude-code/bin/user-prompt-submit.sh` in `~/.claude/settings.json` (match the tail only, since the checkout directory can have any name). If missing, tell the user the permanent install hasn't been done yet. It is a separate one-time step, `<repo>/scripts/install.sh` (idempotent, no prompts; see the README), and NOT part of this skill.
 
 If all three pass, continue.
 
@@ -41,7 +41,7 @@ The "target dir" is where the pointer file goes — usually the repo/worktree ro
 
 Before creating anything:
 
-1. Does `~/.the-brain/agents/<name>/` already exist? If yes, surface: "An agent named `<name>` already exists. Options: (a) reuse it — add the pointer only; (b) pick a new name." Don't silently clobber.
+1. Does `~/.the-brain/agents/<name>/` already exist? If yes, surface: "An agent named `<name>` already exists. Options: (a) reuse it — add the pointer only; (b) pick a new name." `agent init` never overwrites existing files (a rerun exits 0 and only restores missing seed files), so (a) is safe; the question is whether the user meant a different agent.
 2. Does `<target>/.the-brain/memory_root` already exist? If yes, read it. If it points at the same agent, you're done. If it points at a DIFFERENT agent, surface: "This worktree is already linked to `<other-agent>`. Override?" Don't clobber silently.
 
 ## Run the init
@@ -52,6 +52,8 @@ From the the-brain repo dir, run:
 cd <repo>
 pnpm agent init <name> --link <target>
 ```
+
+`agent init` never prompts and is safe to re-run. Exit codes: `0` done (created, repaired or already in place), `1` bad arguments, `2` environment problem, `3` the pointer already names a different agent (add `--relink` to repoint it, after confirming with the user).
 
 Expected output (first line): `✅ Created agent dir: /home/<user>/.the-brain/agents/<name>`
 
@@ -86,6 +88,8 @@ Write this back to the user (adapt names to what they chose):
 > **To activate**: close this Claude Code session and open a fresh one in `<target>`. On first prompt, the UserPromptSubmit hook will inject an (initially empty) `<the-brain>` live block. At the end of the first turn with real content, the Stop hook fires its once-per-session flush and the first observation lands at `memory/observations/`. After that, Stop no-ops for the rest of the session and observation is driven by compaction: `/compact` (or an automatic compaction) always captures.
 >
 > Memory will persist across `/compact`, sessions, and even renaming/moving the worktree (the pointer file travels with it).
+>
+> To teach the agent when to search and what to write down, paste `<repo>/templates/RECALL-INSTRUCTIONS.md` into its instruction file (`CLAUDE.md`, `AGENTS.md` or equivalent).
 
 ## Skip / stop conditions
 

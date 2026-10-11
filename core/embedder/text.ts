@@ -1,5 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
-import { config } from "../config.js";
+import { getProvider, type EmbeddingProvider, type EmbedTaskType } from "./provider.js";
 import {
   isDryRun,
   dryRunVector,
@@ -13,21 +12,6 @@ export {
   resetTickCounter,
   flushTelemetry,
 } from "./gate.js";
-
-// ---------------------------------------------------------------------------
-// Gemini client
-// ---------------------------------------------------------------------------
-
-let ai: GoogleGenAI | null = null;
-
-function getClient(): GoogleGenAI {
-  if (!ai) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-    ai = new GoogleGenAI({ apiKey });
-  }
-  return ai;
-}
 
 // ---------------------------------------------------------------------------
 // 429 backoff/retry
@@ -57,24 +41,14 @@ function isRetryableError(e: unknown): boolean {
 }
 
 async function embedContentWithRetry(
-  client: GoogleGenAI,
+  provider: EmbeddingProvider,
   text: string,
-  taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY"
+  taskType: EmbedTaskType
 ): Promise<number[]> {
   let delayMs = 2000;
   for (let attempt = 1; ; attempt++) {
     try {
-      const response = await client.models.embedContent({
-        model: config.embeddingModel,
-        contents: text,
-        config: {
-          outputDimensionality: config.embeddingDimensions,
-          taskType,
-        },
-      });
-      const values = response.embeddings?.[0]?.values;
-      if (!values) throw new Error("Embedding has no values");
-      return values;
+      return await provider.embed(text, taskType);
     } catch (e) {
       if (isRetryableError(e) && attempt <= EMBED_MAX_RETRIES) {
         // jitter avoids a thundering-herd retry when a whole batch fails together
@@ -99,21 +73,22 @@ async function embedContentWithRetry(
 
 export async function embedTexts(
   texts: string[],
-  taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY"
+  taskType: EmbedTaskType
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
 
   // Kill-switch + telemetry: chargeTick throws if quota exceeded
   const totalChars = texts.reduce((s, t) => s + t.length, 0);
-  const estCostUsd = estimateCostUsd(totalChars);
+  const provider = getProvider();
+  // The spend rate is Gemini's; a provider that is not metered prices at zero.
+  const estCostUsd = provider.metered ? estimateCostUsd(totalChars) : 0;
   chargeTick(texts.length, totalChars, estCostUsd);
 
-  // Dry-run: return zero-vectors of correct dimension, no Gemini call
+  // Dry-run: return zero-vectors of correct dimension, no provider call
   if (isDryRun()) {
     return texts.map(() => dryRunVector());
   }
 
-  const client = getClient();
   const vectors: number[][] = [];
   // Concurrency 3 (was 5): gentler burst against new-project rate limits; the
   // 429 backoff/retry below is the real resilience, this just reduces how often
@@ -123,7 +98,7 @@ export async function embedTexts(
   for (let i = 0; i < texts.length; i += concurrency) {
     const batch = texts.slice(i, i + concurrency);
     const batchVectors = await Promise.all(
-      batch.map((text) => embedContentWithRetry(client, text, taskType))
+      batch.map((text) => embedContentWithRetry(provider, text, taskType))
     );
     vectors.push(...batchVectors);
   }
@@ -133,7 +108,7 @@ export async function embedTexts(
 
 export async function embedText(
   text: string,
-  taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY"
+  taskType: EmbedTaskType
 ): Promise<number[]> {
   const results = await embedTexts([text], taskType);
   return results[0];
