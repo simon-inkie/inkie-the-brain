@@ -620,7 +620,9 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
       join(macBin, "stat"),
       `#!/bin/sh
 if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then
-  exec "${realStat}" -c %Y "$3"
+  # Real stat is GNU on Linux (-c) and BSD on macOS (-f %m); use whichever works.
+  "${realStat}" -c %Y "$3" 2>/dev/null && exit 0
+  exec "${realStat}" -f %m "$3"
 fi
 echo "stat: illegal option -- c" >&2
 exit 1

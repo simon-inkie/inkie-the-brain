@@ -89,3 +89,12 @@ Out of scope:
   1 `on-stop.test.ts` (30 total = 26 build-context + 3 + 1); all share the
   flock cause.
 - Supersedes: the lock description in the previous entry.
+
+### 2026-10-14: CI run 163 on the first commit (macOS L1)
+- Result: all `build-context`, `pre-invocation` and `on-stop` tests that
+  failed in run 162 passed on the macOS runner. 449 of 450 passed; the one
+  failure was a bug in this PR's own test shim: it forwarded to the real
+  `stat -c`, which on macOS is BSD `stat` and rejects `-c`. The shim now
+  tries `-c %Y` then `-f %m`.
+- Supersedes: the claim above that the macOS job was unverified; the earlier
+  entries stay as written.
