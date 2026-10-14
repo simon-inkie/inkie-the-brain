@@ -15,7 +15,8 @@
 # is preserved byte-for-byte. This is a permanent runtime concurrency contract,
 # not a one-shot dev guarantee.
 #
-# Atomic against concurrent invocations of itself via flock on memory/.live-block.lock.
+# Atomic against concurrent invocations of itself: flock on memory/.live-block.lock,
+# or an mkdir lock directory (memory/.live-block.lock.d) where flock is absent.
 #
 # Called automatically by observe.sh and reflect.sh; can also be invoked manually.
 
@@ -75,43 +76,75 @@ COMPRESS_ERA="$SCRIPT_DIR/compress-era.sh"
 ANCHOR_START="<!-- IO_LIVE_START -->"
 ANCHOR_END="<!-- IO_LIVE_END -->"
 
-# --- flock self-atomicity (skipped in --emit mode: pure read, no contention) ---
-
-if [ "$EMIT_MODE" != "true" ]; then
-    if command -v flock >/dev/null 2>&1; then
-        exec 9>"$LOCK_FILE"
-        if ! flock -n 9; then
-            echo "build-context.sh: another instance is running, skipping" >&2
-            exit 0
-        fi
-    else
-        # No flock (stock macOS). mkdir is atomic on every filesystem we run
-        # on, so a lock directory gives the same single-instance guarantee. A
-        # lock whose recorded pid is gone (killed run) is reclaimed once.
-        LOCK_DIR="$LOCK_FILE.d"
-        if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-            LOCK_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-            if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
-                rm -rf "$LOCK_DIR"
-                mkdir "$LOCK_DIR" 2>/dev/null || LOCK_DIR=""
-            else
-                LOCK_DIR=""
-            fi
-            if [ -z "$LOCK_DIR" ]; then
-                echo "build-context.sh: another instance is running, skipping" >&2
-                exit 0
-            fi
-        fi
-        echo "$$" > "$LOCK_DIR/pid"
-        trap 'rm -rf "$LOCK_DIR"' EXIT
-    fi
-fi
+# --- Single-instance lock (skipped in --emit mode: pure read, no contention) ---
+#
+# flock where available; an mkdir lock directory where it is not (stock macOS).
 
 # BSD stat has no -c; GNU stat takes -c %Y and uses -f for filesystem status,
 # so try GNU first and fall back to BSD's -f %m.
 file_mtime() {
     stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
 }
+
+skip_locked() {
+    echo "build-context.sh: another instance is running, skipping" >&2
+    exit 0
+}
+
+# True when the mkdir lock at $1 belongs to nobody: its recorded pid is gone,
+# or it has no pid yet and is older than a few seconds (its owner was killed
+# between mkdir and the pid write).
+lock_is_stale() {
+    local dir="$1" pid age
+    pid="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [ -n "$pid" ]; then
+        ! kill -0 "$pid" 2>/dev/null
+        return
+    fi
+    age=$(( $(date +%s) - $(file_mtime "$dir" 2>/dev/null || date +%s) ))
+    [ "$age" -ge 5 ]
+}
+
+if [ "$EMIT_MODE" != "true" ]; then
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$LOCK_FILE"
+        if ! flock -n 9; then
+            skip_locked
+        fi
+    else
+        LOCK_DIR="$LOCK_FILE.d"
+        GUARD_DIR="$LOCK_FILE.reclaim"
+        LOCK_HELD=false
+        # Only the run that created the lock directory may remove it.
+        trap 'if [ "$LOCK_HELD" = "true" ]; then rm -rf "$LOCK_DIR"; fi' EXIT
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            LOCK_HELD=true
+        elif lock_is_stale "$LOCK_DIR"; then
+            # Reclaiming a dead lock. Reclaimers are serialised by a guard
+            # directory, and the stale lock is renamed away (not deleted in
+            # place) so a lock created by another run in the meantime is
+            # never removed. Whoever loses any step skips like a busy lock.
+            if mkdir "$GUARD_DIR" 2>/dev/null; then
+                if lock_is_stale "$LOCK_DIR" \
+                    && mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null; then
+                    rm -rf "$LOCK_DIR.stale.$$"
+                fi
+                if mkdir "$LOCK_DIR" 2>/dev/null; then
+                    LOCK_HELD=true
+                fi
+                rmdir "$GUARD_DIR" 2>/dev/null || true
+            elif [ $(( $(date +%s) - $(file_mtime "$GUARD_DIR" 2>/dev/null || date +%s) )) -ge 30 ]; then
+                # A reclaimer was killed mid-reclaim; clear its guard so a
+                # later run can reclaim. This run still skips.
+                rmdir "$GUARD_DIR" 2>/dev/null || true
+            fi
+        fi
+        if [ "$LOCK_HELD" != "true" ]; then
+            skip_locked
+        fi
+        echo "$$" > "$LOCK_DIR/pid"
+    fi
+fi
 
 # --- Sanity checks (--emit needs no MEMORY.md: it never splices) ---
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, writeFile, readFile, rm, chmod, access, symlink } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm, chmod, access, symlink, utimes } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -589,7 +589,7 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
   const NEEDED_TOOLS = [
     "bash", "jq", "find", "sort", "grep", "awk", "mktemp", "mv", "rm", "cat",
     "dirname", "basename", "ln", "date", "mkdir", "kill", "head", "tail", "sed",
-    "tr", "wc", "cut", "env", "touch", "chmod",
+    "tr", "wc", "cut", "env", "touch", "chmod", "sleep", "rmdir",
   ];
 
   let macBin: string;
@@ -696,6 +696,49 @@ exit 1
     await writeFile(join(lockDir, "pid"), "2147483646");
 
     await runMac();
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("reclaims a pid-less lock once it is old (owner killed before writing its pid)", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    await mkdir(lockDir);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lockDir, old, old);
+
+    await runMac();
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("does not reclaim a fresh pid-less lock (its owner may be mid-start)", async () => {
+    await writeMemoryMd(ANCHORED);
+    await mkdir(join(memoryDir, ".live-block.lock.d"));
+
+    const { stderr } = await runMac();
+    expect(stderr).toContain("another instance is running");
+    expect(await readMemoryMd()).toBe(ANCHORED);
+  });
+
+  it("concurrent runs over a stale lock yield exactly one holder", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "pid"), "2147483646");
+
+    // Slow jq so the winner holds the lock long enough that every other run
+    // starts while it is held. A second holder would show as fewer than
+    // N-1 skips; a loser exiting non-zero rejects the promise.
+    const realJq = await which("jq");
+    await rm(join(macBin, "jq"));
+    await writeFile(join(macBin, "jq"), `#!/bin/sh\nsleep 0.4\nexec "${realJq}" "$@"\n`);
+    await chmod(join(macBin, "jq"), 0o755);
+
+    const N = 6;
+    const results = await Promise.all(Array.from({ length: N }, () => runMac()));
+    const skipped = results.filter((r) =>
+      r.stderr.includes("another instance is running"),
+    ).length;
+    expect(skipped).toBe(N - 1);
     expect(await readMemoryMd()).not.toContain("stale live block");
   });
 
