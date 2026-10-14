@@ -78,12 +78,40 @@ ANCHOR_END="<!-- IO_LIVE_END -->"
 # --- flock self-atomicity (skipped in --emit mode: pure read, no contention) ---
 
 if [ "$EMIT_MODE" != "true" ]; then
-    exec 9>"$LOCK_FILE"
-    if ! flock -n 9; then
-        echo "build-context.sh: another instance is running, skipping" >&2
-        exit 0
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$LOCK_FILE"
+        if ! flock -n 9; then
+            echo "build-context.sh: another instance is running, skipping" >&2
+            exit 0
+        fi
+    else
+        # No flock (stock macOS). mkdir is atomic on every filesystem we run
+        # on, so a lock directory gives the same single-instance guarantee. A
+        # lock whose recorded pid is gone (killed run) is reclaimed once.
+        LOCK_DIR="$LOCK_FILE.d"
+        if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+            LOCK_PID="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+            if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
+                rm -rf "$LOCK_DIR"
+                mkdir "$LOCK_DIR" 2>/dev/null || LOCK_DIR=""
+            else
+                LOCK_DIR=""
+            fi
+            if [ -z "$LOCK_DIR" ]; then
+                echo "build-context.sh: another instance is running, skipping" >&2
+                exit 0
+            fi
+        fi
+        echo "$$" > "$LOCK_DIR/pid"
+        trap 'rm -rf "$LOCK_DIR"' EXIT
     fi
 fi
+
+# BSD stat has no -c; GNU stat takes -c %Y and uses -f for filesystem status,
+# so try GNU first and fall back to BSD's -f %m.
+file_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
+}
 
 # --- Sanity checks (--emit needs no MEMORY.md: it never splices) ---
 
@@ -145,7 +173,7 @@ REFL_COUNT=${#REFLECTIONS[@]}
 ELDER=()
 HOT=()
 if [ "$REFL_COUNT" -le "$HOT_K" ]; then
-    HOT=("${REFLECTIONS[@]}")
+    HOT=(${REFLECTIONS[@]+"${REFLECTIONS[@]}"})
 else
     ELDER_COUNT=$((REFL_COUNT - HOT_K))
     ELDER=("${REFLECTIONS[@]:0:ELDER_COUNT}")
@@ -168,7 +196,7 @@ ERA_NEEDS_REBUILD=false
 ERA_REBUILD_REASON=""
 
 if [ "$ELDER_COUNT" -gt 0 ]; then
-    LATEST_ELDER_FILE="${ELDER[-1]}"
+    LATEST_ELDER_FILE="${ELDER[$((ELDER_COUNT - 1))]}"
     LATEST_ELDER_BASENAME="$(basename "$LATEST_ELDER_FILE" .md)"
     LATEST_ELDER_DATE="${LATEST_ELDER_BASENAME:0:10}"
 
@@ -195,9 +223,9 @@ if [ "$ERA_NEEDS_REBUILD" = "true" ] && [ "$EMIT_MODE" != "true" ]; then
     # passed as the "current" via compress-era.sh.
     NEW_ABSORB=()
     if [ -z "$ERA_COVERAGE" ] || [ "$ERA_COVERAGE" = "null" ] || [ ! -s "$ERA_FILE" ]; then
-        NEW_ABSORB=("${ELDER[@]}")
+        NEW_ABSORB=(${ELDER[@]+"${ELDER[@]}"})
     else
-        for f in "${ELDER[@]}"; do
+        for f in ${ELDER[@]+"${ELDER[@]}"}; do
             BN="$(basename "$f" .md)"
             DT="${BN:0:10}"
             if [[ "$DT" > "$ERA_COVERAGE" ]]; then
@@ -229,7 +257,7 @@ fi
 
 LATEST_REFL_MTIME=0
 if [ "$REFL_COUNT" -gt 0 ]; then
-    LATEST_REFL_MTIME=$(stat -c %Y "${REFLECTIONS[-1]}")
+    LATEST_REFL_MTIME=$(file_mtime "${REFLECTIONS[$((REFL_COUNT - 1))]}")
 fi
 
 UNPROCESSED_FILES=()
@@ -238,8 +266,8 @@ while IFS= read -r f; do
 done < <(find "$OBS_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
 
 UNPROCESSED_NEW=()
-for f in "${UNPROCESSED_FILES[@]}"; do
-    F_MTIME=$(stat -c %Y "$f")
+for f in ${UNPROCESSED_FILES[@]+"${UNPROCESSED_FILES[@]}"}; do
+    F_MTIME=$(file_mtime "$f")
     if [ "$F_MTIME" -gt "$LATEST_REFL_MTIME" ]; then
         UNPROCESSED_NEW+=("$f")
     fi
@@ -325,7 +353,7 @@ assemble_block() {
         # Step 1: build the CAPPED unprocessed-obs block (priority 2) so we can
         # measure it and reserve budget before adding reflections.
         if [ "$REFL_COUNT" -gt 0 ]; then
-            LATEST_REFL_BN="$(basename "${REFLECTIONS[-1]}" .md)"
+            LATEST_REFL_BN="$(basename "${REFLECTIONS[$((REFL_COUNT - 1))]}" .md)"
         else
             LATEST_REFL_BN="(none)"
         fi
@@ -361,7 +389,7 @@ assemble_block() {
                     break
                 fi
                 if [ "$obs_entry_len" -le "$obs_remaining" ]; then
-                    obs_kept=("$obs_entry" "${obs_kept[@]}")
+                    obs_kept=("$obs_entry" ${obs_kept[@]+"${obs_kept[@]}"})
                     obs_used=$(( obs_used + obs_entry_len ))
                 else
                     # Entry overflows the sub-budget. Keep its head if there is
@@ -371,7 +399,7 @@ assemble_block() {
                         obs_head_keep=$(( obs_remaining - 120 ))
                         [ "$obs_head_keep" -lt 0 ] && obs_head_keep=0
                         obs_trunc="#### ${OBS_BN}"$'\n'$'\n'"${obs_body:0:$obs_head_keep}"$'\n'"> (observation truncated; full text via recall)"$'\n'$'\n'
-                        obs_kept=("$obs_trunc" "${obs_kept[@]}")
+                        obs_kept=("$obs_trunc" ${obs_kept[@]+"${obs_kept[@]}"})
                         obs_used=$(( obs_used + ${#obs_trunc} ))
                     fi
                     obs_dropped=1
@@ -379,7 +407,7 @@ assemble_block() {
                 fi
             done
             local e
-            for e in "${obs_kept[@]}"; do
+            for e in ${obs_kept[@]+"${obs_kept[@]}"}; do
                 obs_block+="$e"
             done
             if [ "$obs_dropped" -eq 1 ]; then
@@ -457,7 +485,7 @@ assemble_block() {
             block+="_No reflections yet._"$'\n'
             block+=$'\n'
         else
-            for f in "${HOT[@]}"; do
+            for f in ${HOT[@]+"${HOT[@]}"}; do
                 BN="$(basename "$f" .md)"
                 block+="## Reflection (${BN})"$'\n'
                 block+=$'\n'
@@ -468,7 +496,7 @@ assemble_block() {
 
         # Zone 3 - Unprocessed Observations
         if [ "$REFL_COUNT" -gt 0 ]; then
-            LATEST_REFL_BN="$(basename "${REFLECTIONS[-1]}" .md)"
+            LATEST_REFL_BN="$(basename "${REFLECTIONS[$((REFL_COUNT - 1))]}" .md)"
         else
             LATEST_REFL_BN="(none)"
         fi
@@ -477,7 +505,7 @@ assemble_block() {
         if [ "$UNPROCESSED_COUNT" -eq 0 ]; then
             block+="_No new observations since the last reflection._"$'\n'
         else
-            for f in "${UNPROCESSED_NEW[@]}"; do
+            for f in ${UNPROCESSED_NEW[@]+"${UNPROCESSED_NEW[@]}"}; do
                 OBS_BN="$(basename "$f" .md)"
                 block+="#### ${OBS_BN}"$'\n'
                 block+=$'\n'
@@ -559,7 +587,7 @@ while true; do
         # Regenerate era at higher level using ALL elders
         if [ "$ELDER_COUNT" -gt 0 ]; then
             ABSORB_DIR="$(mktemp -d)"
-            for f in "${ELDER[@]}"; do
+            for f in ${ELDER[@]+"${ELDER[@]}"}; do
                 ln -s "$f" "$ABSORB_DIR/$(basename "$f")"
             done
             # Wipe era so compress-era treats this as a fresh build at the new level
@@ -580,7 +608,7 @@ while true; do
         # Re-slice
         if [ "$REFL_COUNT" -le "$HOT_K" ]; then
             ELDER=()
-            HOT=("${REFLECTIONS[@]}")
+            HOT=(${REFLECTIONS[@]+"${REFLECTIONS[@]}"})
         else
             ELDER_COUNT=$((REFL_COUNT - HOT_K))
             ELDER=("${REFLECTIONS[@]:0:ELDER_COUNT}")
@@ -590,7 +618,7 @@ while true; do
         HOT_COUNT=${#HOT[@]}
         # Rebuild era at max level absorbing the new (larger) elder set
         ABSORB_DIR="$(mktemp -d)"
-        for f in "${ELDER[@]}"; do
+        for f in ${ELDER[@]+"${ELDER[@]}"}; do
             ln -s "$f" "$ABSORB_DIR/$(basename "$f")"
         done
         : > "$ERA_FILE"

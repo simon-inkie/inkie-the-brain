@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm, chmod, access, symlink } from "node:fs/promises";
+import { constants } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -573,5 +574,133 @@ describe("--cached hard total-cap + unprocessed bound", () => {
     // Per-entry truncation marker present
     expect(stdout).toContain("observation truncated");
     expect(stdout.length).toBeLessThan(9500);
+  });
+});
+
+/**
+ * macOS portability (#16). Stock macOS has no `flock`, its `stat` is BSD
+ * (no `-c`), and /bin/bash is 3.2. The first of those made the script treat
+ * "flock: command not found" as "another instance is running" and exit 0
+ * without touching MEMORY.md, which is why most of this suite failed on the
+ * macOS runner. These tests run the script with a PATH that lacks `flock` and
+ * has a BSD-style `stat`, so the regression shows on Linux too.
+ */
+describe("build-context.sh without flock and with BSD stat (macOS)", () => {
+  const NEEDED_TOOLS = [
+    "bash", "jq", "find", "sort", "grep", "awk", "mktemp", "mv", "rm", "cat",
+    "dirname", "basename", "ln", "date", "mkdir", "kill", "head", "tail", "sed",
+    "tr", "wc", "cut", "env", "touch", "chmod",
+  ];
+
+  let macBin: string;
+
+  async function which(tool: string): Promise<string | undefined> {
+    for (const dir of (process.env.PATH ?? "").split(":")) {
+      const candidate = join(dir, tool);
+      try {
+        await access(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        // keep looking
+      }
+    }
+    return undefined;
+  }
+
+  beforeEach(async () => {
+    macBin = join(testDir, "macbin");
+    await mkdir(macBin, { recursive: true });
+    for (const tool of NEEDED_TOOLS) {
+      const real = await which(tool);
+      if (real) await symlink(real, join(macBin, tool));
+    }
+    // BSD stat: `-c` is an illegal option, `-f %m` prints the mtime.
+    const realStat = await which("stat");
+    await writeFile(
+      join(macBin, "stat"),
+      `#!/bin/sh
+if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then
+  exec "${realStat}" -c %Y "$3"
+fi
+echo "stat: illegal option -- c" >&2
+exit 1
+`,
+    );
+    await chmod(join(macBin, "stat"), 0o755);
+  });
+
+  async function runMac(): Promise<{ stdout: string; stderr: string }> {
+    return execFileAsync(join(macBin, "bash"), [join(toolsDir, "build-context.sh")], {
+      env: { ...process.env, PATH: macBin },
+      timeout: 10000,
+    });
+  }
+
+  const ANCHORED = [
+    "# Mem",
+    "<!-- IO_LIVE_START -->",
+    "stale live block",
+    "<!-- IO_LIVE_END -->",
+    "tail",
+    "",
+  ].join("\n");
+
+  it("the PATH really has no flock (guards the harness itself)", async () => {
+    await expect(
+      execFileAsync(join(macBin, "bash"), ["-c", "command -v flock"], {
+        env: { ...process.env, PATH: macBin },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rebuilds the live block instead of skipping as 'another instance'", async () => {
+    await writeMemoryMd(ANCHORED);
+    await addReflection("2026-06-20", "A reflection about macOS");
+    await addObservation("2026-06-21-09-00", "A fresh observation about macOS");
+
+    const { stderr } = await runMac();
+    expect(stderr).not.toContain("another instance is running");
+
+    const result = await readMemoryMd();
+    expect(result).not.toContain("stale live block");
+    expect(result).toContain("A reflection about macOS");
+    // Needs the BSD-compatible mtime path to classify the observation.
+    expect(result).toContain("A fresh observation about macOS");
+    expect(result).toContain("tail");
+  });
+
+  it("releases its lock when it finishes, so back-to-back runs both work", async () => {
+    await writeMemoryMd(ANCHORED);
+    await runMac();
+    await writeMemoryMd(ANCHORED);
+    await runMac();
+    expect(await readMemoryMd()).not.toContain("stale live block");
+    await expect(access(join(memoryDir, ".live-block.lock.d"))).rejects.toThrow();
+  });
+
+  it("skips (exit 0, MEMORY.md untouched) while a live process holds the lock", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "pid"), String(process.pid));
+
+    const { stderr } = await runMac();
+    expect(stderr).toContain("another instance is running");
+    expect(await readMemoryMd()).toBe(ANCHORED);
+  });
+
+  it("reclaims a lock left behind by a process that no longer exists", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "pid"), "2147483646");
+
+    await runMac();
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("uses no negative array subscripts (bash 3.2 rejects ${arr[-1]})", async () => {
+    const src = await readFile(BUILD_CONTEXT_SH, "utf8");
+    expect(src).not.toMatch(/\[-\d+\]/);
   });
 });
