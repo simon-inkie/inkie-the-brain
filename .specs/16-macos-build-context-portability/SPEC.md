@@ -98,3 +98,19 @@ Out of scope:
   tries `-c %Y` then `-f %m`.
 - Supersedes: the claim above that the macOS job was unverified; the earlier
   entries stay as written.
+
+### 2026-10-14: second review (stat flavour, guard clearing, tests)
+- What changed: `file_mtime` is chosen once by probing (`stat -c %Y .`, then
+  `stat -f %m .`) instead of falling back per call, because GNU `stat -f %m`
+  treats `%m` as a filename and prints a multi-line block if the path vanished
+  between calls. `path_age` fails (so the caller skips) on any unreadable
+  mtime; the pid write no longer fails the run. A stale guard is renamed away
+  and then removed rather than `rmdir`-ed after a separate age check. The
+  guard-clearing race is narrowed, not eliminated: see Known limitations.
+  Tests: stale guard cleared then lock reclaimed, fresh guard left alone, the
+  test `stat` shim probes the real stat once, and the lock tests run the script
+  with `/bin/bash`.
+- Why: re-review at 07b24e2 (CI run 165 green on macOS and Docker) found the
+  per-call fallback could exit 1 under `set -u`, and the guard clearing was not
+  atomic.
+- Supersedes: the guard-clearing description in the "review fixes" entry.

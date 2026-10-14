@@ -79,11 +79,34 @@ ANCHOR_END="<!-- IO_LIVE_END -->"
 # --- Single-instance lock (skipped in --emit mode: pure read, no contention) ---
 #
 # flock where available; an mkdir lock directory where it is not (stock macOS).
+# The mkdir path is exclusive in normal operation and when a holder dies
+# (stale lock reclaim is serialised). Known limitation, best effort only: if a
+# run is killed in the middle of reclaiming, its guard is cleared after 30s by
+# an age check followed by a rename that are not one atomic step, so a run
+# stalled for over 30s at exactly that point could remove a fresh guard. No
+# path in this section exits non-zero; every failure is a skip (exit 0).
 
-# BSD stat has no -c; GNU stat takes -c %Y and uses -f for filesystem status,
-# so try GNU first and fall back to BSD's -f %m.
-file_mtime() {
-    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
+# Detect the stat flavour once. GNU stat takes -c %Y; BSD stat takes -f %m.
+# Probing per call would be unsafe: on GNU stat -f means filesystem status and
+# %m is read as a filename, so a path that vanished between two calls would
+# print a multi-line block instead of failing. file_mtime prints the mtime in
+# epoch seconds, or fails (prints nothing) so callers can skip safely.
+if stat -c %Y . >/dev/null 2>&1; then
+    file_mtime() { stat -c %Y "$1" 2>/dev/null; }
+elif stat -f %m . >/dev/null 2>&1; then
+    file_mtime() { stat -f %m "$1" 2>/dev/null; }
+else
+    file_mtime() { return 1; }
+fi
+
+# Seconds since $1 was last modified. Fails (so the caller treats the path as
+# NOT old) if its mtime cannot be read as a number.
+path_age() {
+    local mt now
+    mt="$(file_mtime "$1")" || return 1
+    case "$mt" in ''|*[!0-9]*) return 1 ;; esac
+    now="$(date +%s)" || return 1
+    echo $(( now - mt ))
 }
 
 skip_locked() {
@@ -101,7 +124,7 @@ lock_is_stale() {
         ! kill -0 "$pid" 2>/dev/null
         return
     fi
-    age=$(( $(date +%s) - $(file_mtime "$dir" 2>/dev/null || date +%s) ))
+    age="$(path_age "$dir")" || return 1
     [ "$age" -ge 5 ]
 }
 
@@ -133,16 +156,20 @@ if [ "$EMIT_MODE" != "true" ]; then
                     LOCK_HELD=true
                 fi
                 rmdir "$GUARD_DIR" 2>/dev/null || true
-            elif [ $(( $(date +%s) - $(file_mtime "$GUARD_DIR" 2>/dev/null || date +%s) )) -ge 30 ]; then
-                # A reclaimer was killed mid-reclaim; clear its guard so a
-                # later run can reclaim. This run still skips.
-                rmdir "$GUARD_DIR" 2>/dev/null || true
+            elif age="$(path_age "$GUARD_DIR")" && [ "$age" -ge 30 ] \
+                && mv "$GUARD_DIR" "$GUARD_DIR.stale.$$" 2>/dev/null; then
+                # A reclaimer was killed mid-reclaim. Clear its guard (renamed
+                # away, then removed) so a later run can reclaim. This run
+                # still skips. Best effort: see the limitation note above.
+                rm -rf "$GUARD_DIR.stale.$$"
             fi
         fi
         if [ "$LOCK_HELD" != "true" ]; then
             skip_locked
         fi
-        echo "$$" > "$LOCK_DIR/pid"
+        # If the pid cannot be written the lock still holds; an old pid-less
+        # lock is reclaimed by lock_is_stale, so never fail the run here.
+        echo "$$" > "$LOCK_DIR/pid" 2>/dev/null || true
     fi
 fi
 

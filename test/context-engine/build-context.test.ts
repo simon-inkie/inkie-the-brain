@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile, readFile, rm, chmod, access, symlink, utimes } from "node:fs/promises";
 import { constants } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -615,14 +616,22 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
       if (real) await symlink(real, join(macBin, tool));
     }
     // BSD stat: `-c` is an illegal option, `-f %m` prints the mtime.
-    const realStat = await which("stat");
+    // The real stat is GNU on Linux (-c %Y) and BSD on macOS (-f %m); probe it
+    // once here and bake the working form into the shim, so the shim never
+    // falls back per call.
+    const realStat = (await which("stat"))!;
+    let realMtime: string;
+    try {
+      execFileSync(realStat, ["-c", "%Y", "."], { stdio: "ignore" });
+      realMtime = `-c %Y`;
+    } catch {
+      realMtime = `-f %m`;
+    }
     await writeFile(
       join(macBin, "stat"),
       `#!/bin/sh
 if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then
-  # Real stat is GNU on Linux (-c) and BSD on macOS (-f %m); use whichever works.
-  "${realStat}" -c %Y "$3" 2>/dev/null && exit 0
-  exec "${realStat}" -f %m "$3"
+  exec "${realStat}" ${realMtime} "$3"
 fi
 echo "stat: illegal option -- c" >&2
 exit 1
@@ -632,7 +641,8 @@ exit 1
   });
 
   async function runMac(): Promise<{ stdout: string; stderr: string }> {
-    return execFileAsync(join(macBin, "bash"), [join(toolsDir, "build-context.sh")], {
+    // /bin/bash, like the older tests' intent: bash 3.2 on the macOS runner.
+    return execFileAsync("/bin/bash", [join(toolsDir, "build-context.sh")], {
       env: { ...process.env, PATH: macBin },
       timeout: 10000,
     });
@@ -718,6 +728,40 @@ exit 1
 
     const { stderr } = await runMac();
     expect(stderr).toContain("another instance is running");
+    expect(await readMemoryMd()).toBe(ANCHORED);
+  });
+
+  it("clears a stale reclaim guard (reclaimer killed), then the next run reclaims the lock", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    const guardDir = join(memoryDir, ".live-block.lock.reclaim");
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "pid"), "2147483646");
+    await mkdir(guardDir);
+    const old = new Date(Date.now() - 120_000);
+    await utimes(guardDir, old, old);
+
+    // First run only clears the guard and skips cleanly (exit 0).
+    const first = await runMac();
+    expect(first.stderr).toContain("another instance is running");
+    await expect(access(guardDir)).rejects.toThrow();
+    expect(await readMemoryMd()).toBe(ANCHORED);
+
+    await runMac();
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("leaves a fresh reclaim guard alone and skips", async () => {
+    await writeMemoryMd(ANCHORED);
+    const lockDir = join(memoryDir, ".live-block.lock.d");
+    const guardDir = join(memoryDir, ".live-block.lock.reclaim");
+    await mkdir(lockDir);
+    await writeFile(join(lockDir, "pid"), "2147483646");
+    await mkdir(guardDir);
+
+    const { stderr } = await runMac();
+    expect(stderr).toContain("another instance is running");
+    await access(guardDir);
     expect(await readMemoryMd()).toBe(ANCHORED);
   });
 
