@@ -46,6 +46,15 @@ Out of scope:
   dependency of `openclaw` is blocked); tests ran with every dependency except
   `openclaw`, so `tsc` reports only `openclaw` module errors.
 
+## Known limitations
+
+- The `mkdir` lock (used only where `flock` is absent) is exclusive in normal
+  operation and when a holder dies. After a reclaimer is killed mid-reclaim,
+  its guard is cleared after 30s by an age check plus a rename that are not one
+  atomic step, so a run stalled for over 30s at exactly that point could remove
+  a fresh guard. This is best effort. Every failure on these paths is a skip
+  (exit 0), never a non-zero exit.
+
 ## Follow-ups
 
 - Spend ledger `ENOENT` on a fresh runner (non-fatal).
