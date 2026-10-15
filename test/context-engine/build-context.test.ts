@@ -746,25 +746,67 @@ exit 1
     throw new Error(`timed out waiting for ${path}`);
   }
 
-  /** A bin dir like macBin, with the first jq call paused until gate/release. */
+  /** Shell text that pauses once, until gate/release exists (400 x 50ms max). */
+  function pauseOnce(gate: string, label: string): string {
+    return `if [ ! -e "${gate}/started" ]; then
+  echo "${label}" > "${gate}/started"
+  i=0
+  while [ ! -e "${gate}/release" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+fi`;
+  }
+
+  /**
+   * A bin dir like macBin whose lock step pauses once, in the run that WON the
+   * lock, immediately after the lock exists and before any other work: the
+   * interval in which a lock that is not yet fully published (a directory
+   * created but its owner id not yet written) can be judged stale. It does
+   * this by wrapping whatever the script uses to take the lock: flock or perl
+   * for the kernel lock, mkdir for a directory lock. Only a successful call
+   * (exit 0) pauses, so runs that lose the lock never do.
+   */
   async function gatedBin(name: string, withFlock: boolean): Promise<string> {
     const dir = await makeBin(name, { flock: withFlock, perl: true });
-    const realJq = await which("jq");
-    await rm(join(dir, "jq"));
     const gate = join(testDir, "gate");
     await mkdir(gate, { recursive: true });
-    await writeFile(
-      join(dir, "jq"),
-      `#!/bin/sh
-if [ ! -e "${gate}/started" ]; then
-  : > "${gate}/started"
-  i=0
-  while [ ! -e "${gate}/release" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done
+    for (const tool of ["flock", "perl", "mkdir"]) {
+      const real = await which(tool);
+      if (!real || !(tool === "mkdir" || tool === "perl" || withFlock)) continue;
+      await rm(join(dir, tool), { force: true });
+      await writeFile(
+        join(dir, tool),
+        `#!/bin/sh
+"${real}" "$@"
+rc=$?
+${tool === "mkdir" ? 'case "$*" in *live-block.lock.d*) ;; *) exit $rc ;; esac' : ""}
+if [ $rc -eq 0 ]; then
+${pauseOnce(gate, tool)}
 fi
-exec "${realJq}" "$@"
+exit $rc
+`,
+      );
+      await chmod(join(dir, tool), 0o755);
+    }
+    return dir;
+  }
+
+  /**
+   * A bin dir whose perl pauses BEFORE taking the lock: the lock file is open
+   * on fd 9 but not yet locked.
+   */
+  async function preLockBin(name: string): Promise<string> {
+    const dir = await makeBin(name, { flock: false, perl: true });
+    const gate = join(testDir, "gate");
+    await mkdir(gate, { recursive: true });
+    const real = (await which("perl"))!;
+    await rm(join(dir, "perl"));
+    await writeFile(
+      join(dir, "perl"),
+      `#!/bin/sh
+${pauseOnce(gate, "before-lock")}
+exec "${real}" "$@"
 `,
     );
-    await chmod(join(dir, "jq"), 0o755);
+    await chmod(join(dir, "perl"), 0o755);
     return dir;
   }
 
@@ -789,14 +831,15 @@ exec "${realJq}" "$@"
     });
   }
 
-  it("a run paused while holding the lock keeps it: others skip, then it finishes", async () => {
+  it("a run paused right after the lock is created keeps it (even past the old 5s staleness limit)", async () => {
     await writeMemoryMd(ANCHORED);
     const holderBin = await gatedBin("holder-bin", false);
     const holder = startHolder(holderBin);
     await waitForFile(join(testDir, "gate", "started"));
 
-    // Several contenders while the holder is paused (this is the interval in
-    // which a pid-file lock could be judged stale).
+    // Long enough that a lock judged by age or by a missing owner id (the
+    // previous directory-lock design) would be considered abandoned.
+    await new Promise((r) => setTimeout(r, 5500));
     for (let i = 0; i < 3; i++) {
       const { stderr } = await runMac();
       expect(stderr).toContain("another instance is running");
@@ -811,6 +854,22 @@ exec "${realJq}" "$@"
     await writeMemoryMd(ANCHORED);
     const next = await runMac();
     expect(next.stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  }, 30000);
+
+  it("a run paused after opening the lock file but before locking neither blocks nor corrupts", async () => {
+    await writeMemoryMd(ANCHORED);
+    const holder = startHolder(await preLockBin("pre-lock"));
+    await waitForFile(join(testDir, "gate", "started"));
+
+    // It holds nothing yet, so another run proceeds normally.
+    const { stderr } = await runMac();
+    expect(stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+
+    // Resumed, it takes the (now free) lock and finishes cleanly.
+    await release();
+    expect(await holder.done).toBe(0);
     expect(await readMemoryMd()).not.toContain("stale live block");
   });
 
@@ -922,8 +981,10 @@ exec "${realJq}" "$@"
 
     // Every run uses a bin whose first jq call is gated; only the winner gets
     // that far. Start six runs, alternating the two lock tools.
+    const errs: string[][] = [];
     const children = Array.from({ length: 6 }, (_, i) => {
       const out: string[] = [];
+      errs.push(out);
       const child = spawn("/bin/bash", [join(toolsDir, "build-context.sh")], {
         env: { ...process.env, PATH: i % 2 ? flockBin : perlBin },
         stdio: ["ignore", "ignore", "pipe"],
@@ -936,7 +997,12 @@ exec "${realJq}" "$@"
     });
 
     await waitForFile(join(testDir, "gate", "started"));
-    await new Promise((r) => setTimeout(r, 500)); // let the five losers skip
+    // Release only once all five losers have reported, so none can start late
+    // and legitimately take the lock after the winner finishes.
+    const end = Date.now() + 15000;
+    const skips = () =>
+      errs.filter((o) => o.join("").includes("another instance is running")).length;
+    while (skips() < 5 && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
     await release();
     const results = await Promise.all(children);
 
