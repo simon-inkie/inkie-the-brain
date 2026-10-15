@@ -168,3 +168,8 @@ Out of scope:
   change and test above).
 - Supersedes: the lock descriptions and the Known limitations of the earlier
   entries; those entries stay as written.
+- Also: macOS CI run 166 failed once in `antigravity/on-stop.test.ts` teardown
+  (ENOTEMPTY): the Stop hook starts `build-context.sh` detached, so it can
+  still be writing into the silo when the directory is removed. Teardown now
+  retries removal (`maxRetries`); the same code passed in the next run, so it
+  was a flake rather than a product bug.
