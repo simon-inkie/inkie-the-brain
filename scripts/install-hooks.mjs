@@ -18,7 +18,7 @@
  */
 import {
   existsSync, mkdirSync, readFileSync, renameSync, copyFileSync,
-  realpathSync, statSync, openSync, fchmodSync, writeSync, closeSync, unlinkSync,
+  realpathSync, statSync, openSync, fchmodSync, writeFileSync, closeSync, unlinkSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -109,7 +109,7 @@ if (!changed) {
   }
   const fd = openSync(tmp, "wx", 0o600);
   try {
-    writeSync(fd, JSON.stringify(settings, null, 2) + "\n");
+    writeFileSync(fd, JSON.stringify(settings, null, 2) + "\n"); // loops on short writes
     fchmodSync(fd, finalMode);
   } catch (e) {
     closeSync(fd);
@@ -117,6 +117,11 @@ if (!changed) {
     throw e;
   }
   closeSync(fd);
-  renameSync(tmp, settingsPath);
+  try {
+    renameSync(tmp, settingsPath);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* best effort */ }
+    throw e;
+  }
   console.log(`install-hooks: wrote ${settingsPath}`);
 }

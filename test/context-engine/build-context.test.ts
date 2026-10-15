@@ -595,6 +595,18 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
 
   let macBin: string;
 
+  // The mixed-tool cases need a real flock(1) on the host (stock macOS has
+  // none). They are skipped there, with a stated reason, instead of quietly
+  // degrading to perl-against-perl.
+  let hostFlock = false;
+  try {
+    execFileSync("sh", ["-c", "command -v flock"], { stdio: "ignore" });
+    hostFlock = true;
+  } catch {
+    hostFlock = false;
+  }
+  const itFlock = it.skipIf(!hostFlock);
+
   async function which(tool: string): Promise<string | undefined> {
     for (const dir of (process.env.PATH ?? "").split(":")) {
       const candidate = join(dir, tool);
@@ -621,6 +633,10 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
     for (const tool of tools) {
       const real = await which(tool);
       if (real) await symlink(real, join(dir, tool));
+      else if (tool === "flock" || tool === "perl") {
+        // Never let a bin quietly lose the tool a test is about.
+        throw new Error(`${tool} requested for ${name} but not found on the host`);
+      }
     }
     // BSD stat: `-c` is an illegal option, `-f %m` prints the mtime. The real
     // stat is GNU on Linux (-c %Y) and BSD on macOS (-f %m); probe it once here
@@ -810,7 +826,7 @@ exec "${realJq}" "$@"
     expect(await readMemoryMd()).not.toContain("stale live block");
   });
 
-  it("mixed PATH: a flock(1) holder excludes a perl-only run", async () => {
+  itFlock("mixed PATH: a flock(1) holder excludes a perl-only run", async () => {
     await writeMemoryMd(ANCHORED);
     const holder = startHolder(await gatedBin("with-flock", true));
     await waitForFile(join(testDir, "gate", "started"));
@@ -823,7 +839,7 @@ exec "${realJq}" "$@"
     expect(await holder.done).toBe(0);
   });
 
-  it("mixed PATH: a perl-only holder excludes a flock(1) run", async () => {
+  itFlock("mixed PATH: a perl-only holder excludes a flock(1) run", async () => {
     await writeMemoryMd(ANCHORED);
     const holder = startHolder(await gatedBin("perl-only", false));
     await waitForFile(join(testDir, "gate", "started"));
@@ -837,6 +853,28 @@ exec "${realJq}" "$@"
     expect(await holder.done).toBe(0);
   });
 
+  it("a flock failure that is not contention warns and runs unlocked instead of skipping", async () => {
+    await writeMemoryMd(ANCHORED);
+    const failBin = await makeBin("perl-fails", { flock: false, perl: false });
+    // perl stand-in: exit 3, what the lock snippet returns for an flock error
+    // other than "would block" (for example ENOLCK).
+    await writeFile(join(failBin, "perl"), "#!/bin/sh\nexit 3\n");
+    await chmod(join(failBin, "perl"), 0o755);
+
+    const { stderr } = await runIn(failBin);
+    expect(stderr).toContain("no usable file lock");
+    expect(stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("leaves no temp files beside MEMORY.md or live-state.json", async () => {
+    await writeMemoryMd(ANCHORED);
+    await runMac();
+    const { readdir } = await import("node:fs/promises");
+    expect((await readdir(workspaceDir)).filter((f) => f.startsWith("MEMORY.md."))).toEqual([]);
+    expect((await readdir(memoryDir)).filter((f) => f.startsWith("live-state.json."))).toEqual([]);
+  });
+
   it("with neither flock nor perl it still rebuilds, and says it has no lock", async () => {
     await writeMemoryMd(ANCHORED);
     const bareBin = await makeBin("bare-bin", { flock: false, perl: false });
@@ -846,7 +884,7 @@ exec "${realJq}" "$@"
     expect(await readMemoryMd()).not.toContain("stale live block");
   });
 
-  it("concurrent runs over mixed PATHs yield exactly one holder", async () => {
+  itFlock("concurrent runs over mixed PATHs yield exactly one holder", async () => {
     await writeMemoryMd(ANCHORED);
     const flockBin = await gatedBin("g-flock", true);
     const perlBin = await gatedBin("g-perl", false);

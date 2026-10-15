@@ -21,7 +21,8 @@ descriptor, taken with `flock(1)` when available and with `perl` (shipped with
 macOS) otherwise. The kernel drops it when the holder exits, so there is no pid
 file or stale-lock reclaim, a live owner cannot lose its lock, and runs that
 found different tools still exclude each other. With neither tool the run
-proceeds unlocked and says so on stderr.
+proceeds unlocked and says so on stderr (also when `flock` fails for a reason
+other than contention; perl reports that as status 3).
 
 Not verified here: a real macOS run (see Test plan). The acceptance criterion
 of three green scheduled runs on `main` can only be met after merge.
@@ -51,9 +52,13 @@ Out of scope:
   keeps it against three contenders and then finishes; a holder killed at the
   pause point frees the lock with no reclaim step; mixed PATH in both
   directions (`flock(1)` holder vs perl-only run, and the reverse); neither
-  tool available (rebuilds, warns); six concurrent runs over mixed PATHs give
+  tool available (rebuilds, warns); a non-contention flock failure (warns,
+  runs unlocked, does not skip); no temp files left beside the targets; six concurrent runs over mixed PATHs give
   exactly five skips; an unreadable mtime defaults to 0 with no numeric error;
   no negative array subscripts in the source.
+- The mixed-tool cases need a real `flock(1)`; they are skipped with a stated
+  reason on hosts without one (stock macOS), and the bin builder refuses to
+  silently drop a requested tool.
 - New install-hooks tests: a 0600 settings file stays 0600 under umask 022 with
   no temp file left; a loose-mode temp file left by a crashed run is replaced;
   a symlink planted at the temp path is not written through.
@@ -71,7 +76,9 @@ Out of scope:
   process that inherits fd 9 and outlives the run keeps the lock until it
   exits, as with `flock(1)` before this change.
 - With neither `flock` nor `perl` on the PATH the run is unlocked (it warns).
-  MEMORY.md is still replaced atomically; only duplicate work is possible.
+  Only the MEMORY.md splice stays atomic (its temp file is created next to the
+  target so the final `mv` is a rename); concurrent unlocked runs can still
+  race on `live-state.json` (read-modify-write) and `era-summary.md`.
 
 ## Follow-ups
 
@@ -173,3 +180,19 @@ Out of scope:
   still be writing into the silo when the directory is removed. Teardown now
   retries removal (`maxRetries`); the same code passed in the next run, so it
   was a flake rather than a product bug.
+
+### 2026-10-15: third review round
+- What changed: the three mixed-tool tests are skipped when the host has no
+  `flock(1)` and the test bin builder throws if a requested `flock` or `perl`
+  is missing; perl reports a non-contention `flock` error as 3, which takes the
+  warned, unlocked path instead of the "held" skip; the splice and
+  `live-state.json` temp files are created next to their targets
+  (`mktemp "$target.XXXXXX"`) so `mv` is a rename; the unlocked-run wording is
+  narrowed (see Known limitations); `install-hooks.mjs` writes with
+  `writeFileSync(fd, ...)` and removes its temp file if the rename fails. A test
+  for the status-3 path and one for leftover temp files were added.
+- Why: see REVIEW.md. The macOS job failed on one test that assumed a host
+  `flock`.
+- Left alone: the antigravity teardown retry (acceptable as is; waiting for the
+  detached rebuild would be a larger test change).
+- Supersedes: the "still replaced atomically" claim for the unlocked path.

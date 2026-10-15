@@ -85,11 +85,13 @@ ANCHOR_END="<!-- IO_LIVE_END -->"
 # taken with flock(1) when the PATH has it, otherwise with perl (shipped with
 # stock macOS); both call flock(2) on the same fd, so a run that found one tool
 # and a run that found the other exclude each other. If neither tool is
-# available the run proceeds WITHOUT a lock and says so on stderr: MEMORY.md is
-# still replaced atomically (temp file + rename), the lock only avoids
-# duplicate work, and skipping would be the silent no-op this fixes.
+# available, or flock itself fails for a reason other than contention, the run
+# proceeds WITHOUT a lock and says so on stderr (skipping would be the silent
+# no-op this fixes). Unlocked, only the MEMORY.md splice is atomic: the temp
+# file is created next to its target so mv is a rename, but concurrent runs can
+# still race on live-state.json (read-modify-write) and era-summary.md.
 # Exit status of an acquire attempt: 0 = acquired, 1 = held by another run,
-# anything else = lock tooling unavailable or failed.
+# anything else = lock tooling unavailable or failed (perl: 3 = flock error).
 
 acquire_lock() {
     local rc=0
@@ -97,7 +99,7 @@ acquire_lock() {
         flock -n 9 || rc=$?
     elif command -v perl >/dev/null 2>&1; then
         perl -e 'use Fcntl qw(:flock); open(my $fh, "<&=", 9) or exit 2;
-                 exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1)' || rc=$?
+                 exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : ($!{EWOULDBLOCK} ? 1 : 3))' || rc=$?
     else
         rc=127
     fi
@@ -170,7 +172,7 @@ write_state() {
     local value="$2"
     local is_string="${3:-false}"
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$LIVE_STATE_FILE.XXXXXX")" # same directory, so mv is a rename
     if [ "$is_string" = "true" ]; then
         jq --arg v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp"
     else
@@ -666,7 +668,7 @@ splice_into_memory() {
     local memory_file="$1"
     local block="$2"
     local tmp block_file
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$memory_file.XXXXXX")" # same directory, so mv is a rename
     block_file="$(mktemp)"
     printf '%s\n' "$block" > "$block_file"
 
