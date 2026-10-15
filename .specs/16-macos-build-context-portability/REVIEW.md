@@ -1,19 +1,21 @@
 # #16: review log
 
 Every finding from each review round on the pull request, with what was done
-and the commit. Reviews came from people and from an automated review; they are
-described here as "a reviewer" and "an automated review". Commits are short
-hashes on the branch.
+and the commit. The reviews were automated reviews posted by the maintainer;
+they are described here as "a reviewer" and "an automated review". Commits are
+short hashes on the branch.
 
-Severity labels are the reviewer's own. "Round 3" is the review of head
-`ec5a0ee`, "round 4" the review of head `946d89d`.
+Severity is as the review labelled it. Where a review gave no label the cell
+says "unlabelled" (the first two reviews numbered their blocking problems
+without a severity word). "Round 3" is the review of head `ec5a0ee`, "round 4"
+the review of head `946d89d`, "round 5" the review of head `ca11aad`.
 
 ## Round 1: first review (head 1039b5b)
 
 | Finding | Severity | Outcome | Commit |
 |---|---|---|---|
-| Two runs reclaiming a stale `mkdir` lock at once can both hold it, and losers can exit 1 | Major | Fixed: reclaim by atomic rename; every losing step skips with exit 0. Later superseded by the kernel lock (round 3) | cf5051b |
-| A lock directory with no pid file is never reclaimed; trap set too late | Major | Fixed: trap set before the lock is taken; old pid-less lock reclaimed. Later superseded by the kernel lock (round 3) | cf5051b |
+| Two runs reclaiming a stale `mkdir` lock at once can both hold it, and losers can exit 1 | unlabelled (blocking) | Fixed: reclaim by atomic rename; every losing step skips with exit 0. Later superseded by the kernel lock (round 3) | cf5051b |
+| A lock directory with no pid file is never reclaimed; trap set too late | unlabelled (blocking) | Fixed: trap set before the lock is taken; old pid-less lock reclaimed. Later superseded by the kernel lock (round 3) | cf5051b |
 | Header comments still said the lock is flock only | Minor | Fixed | cf5051b |
 | PR text omitted the fourth failing test (antigravity on-stop) | Minor | Fixed in the PR text | n/a |
 | `_log.sh` uses GNU-only `date` `%3N` | Minor | Deferred, listed as a follow-up (outside this diff) | n/a |
@@ -23,11 +25,11 @@ Severity labels are the reviewer's own. "Round 3" is the review of head
 
 | Finding | Severity | Outcome | Commit |
 |---|---|---|---|
-| `file_mtime` fell back from `stat -c` to `stat -f` per call, which prints a block under GNU stat and could exit 1 | Major | Fixed: flavour probed once; failures skip | 4194bff |
-| Clearing a stale guard (age check then removal) is not atomic | Major | Narrowed and documented first (guard renamed away, limitation recorded); removed entirely in round 3 when the guard went away | 4194bff, a736ebb |
-| Test shim had the same per-call fallback | Minor | Fixed: shim probes once | 4194bff |
+| `file_mtime` fell back from `stat -c` to `stat -f` per call, which prints a block under GNU stat and could exit 1 | unlabelled (blocking) | Fixed: flavour probed once; failures skip | 4194bff |
+| Clearing a stale guard (age check then removal) is not atomic | unlabelled (blocking) | Narrowed and documented first (guard renamed away, limitation recorded); removed entirely in round 3 when the guard went away | 4194bff, a736ebb |
+| Test shim had the same per-call fallback | unlabelled (part of the first problem) | Fixed: shim probes once | 4194bff |
 | Lock tests should run under `/bin/bash` | Minor | Fixed | 4194bff |
-| A test shim bug failed one test on the macOS runner (real stat is BSD there) | Minor | Fixed | 07b24e2 |
+| A test shim bug failed one test on the macOS runner (real stat is BSD there) | unlabelled (CI failure) | Fixed | 07b24e2 |
 
 ## Round 3: two reviews of head ec5a0ee, plus an automated review
 
@@ -41,8 +43,8 @@ Severity labels are the reviewer's own. "Round 3" is the review of head
 | Automated review: empty mtime breaks the numeric comparison (same two call sites) | Minor | Fixed with the item above | a736ebb |
 | 30 second delay before a dead reclaimer's guard is cleared | Minor | Accepted as a trade-off at the time; moot once the guard was removed | a736ebb |
 | Branch carries commits from earlier changes | Minor | Not applicable: `origin/main` had not moved, so merging it was a no-op and the diff against it is only this issue's files | n/a |
-| Earlier commits carry trailers and a personal author email | Note | Left alone; rewriting would need a force-push, so it is for the maintainer to decide | n/a |
-| One macOS run failed once in the antigravity on-stop teardown (ENOTEMPTY) | Flake | Fixed: teardown retries removal | 946d89d |
+| Earlier commits carry trailers and a personal author email | unlabelled | Left alone; rewriting would need a force-push, so it is for the maintainer to decide | n/a |
+| One macOS run failed once in the antigravity on-stop teardown (ENOTEMPTY) | unlabelled (CI flake) | Fixed: teardown retries removal | 946d89d |
 
 ## Round 4: review of head 946d89d
 
@@ -54,4 +56,16 @@ Severity labels are the reviewer's own. "Round 3" is the review of head
 | "Unlocked but still atomic" overstated: temp file in `$TMPDIR` can make `mv` a copy; other state can race | Minor | Fixed: temp files created next to their targets; wording narrowed in the script, CHANGELOG, SPEC and PR text; test for leftover temp files added | c219fa8 |
 | `writeSync` may write partially; temp file left if the rename fails | Nit | Fixed: `writeFileSync(fd, ...)`; temp file removed if the rename fails | c219fa8 |
 | Teardown retry does not wait for the detached rebuild | Nit | Left as is (reviewer called it acceptable); waiting would be a larger test change | n/a |
-| Commit identity and trailers on the earlier commits | Nit | New commits use the identity git already had configured, with no author override; earlier commits untouched | c219fa8 |
+| Commit identity and trailers on the earlier commits | Nit | New commits use the default configured identity; earlier commits untouched; the identity question is left to the maintainer | c219fa8 |
+
+## Round 5: review of head ca11aad (approved)
+
+| Finding | Severity | Outcome | Commit |
+|---|---|---|---|
+| The flock(1)-vs-perl tests run on no CI host (macOS skips them, the Docker job does not run vitest) | Minor | Not fixed in CI (workflows and runners are out of scope). Wording corrected in the PR text, SPEC and test comments to say they run only on hosts with `flock` and are not run by the current CI; running them in CI is a SPEC follow-up | 0f0d093, plus the docs commit that adds this section |
+| This log said the reviews came from people and an automated review | Minor | Reworded: automated reviews posted by the maintainer | 0f0d093, plus the docs commit that adds this section |
+| Severities given for items the review never labelled | Nit | Marked "unlabelled" and the intro explains it | 0f0d093, plus the docs commit that adds this section |
+| SPEC heading "third review round" disagreed with this log's "Round 4"; a long SPEC line | Nit | Heading renamed "review round 4"; line wrapped at 80 | 0f0d093, plus the docs commit that adds this section |
+| A failed write leaves `MEMORY.md.XXXXXX` or `live-state.json.XXXXXX` next to user files | Nit | Fixed: the splice and the state write remove their temp files on failure (still returning non-zero); two tests added | 0f0d093, plus the docs commit that adds this section |
+| Commit identity wording in this log | Nit | Made generic ("the default configured identity") | 0f0d093, plus the docs commit that adds this section |
+| Commit identity itself | Maintainer's decision | Nothing done | n/a |

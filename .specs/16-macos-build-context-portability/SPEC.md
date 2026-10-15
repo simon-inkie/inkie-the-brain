@@ -53,12 +53,16 @@ Out of scope:
   pause point frees the lock with no reclaim step; mixed PATH in both
   directions (`flock(1)` holder vs perl-only run, and the reverse); neither
   tool available (rebuilds, warns); a non-contention flock failure (warns,
-  runs unlocked, does not skip); no temp files left beside the targets; six concurrent runs over mixed PATHs give
-  exactly five skips; an unreadable mtime defaults to 0 with no numeric error;
-  no negative array subscripts in the source.
-- The mixed-tool cases need a real `flock(1)`; they are skipped with a stated
+  runs unlocked, does not skip); no temp files left beside the targets, also
+  when the splice or a state write fails; six concurrent runs over mixed PATHs
+  give exactly five skips; an unreadable mtime defaults to 0 with no numeric
+  error; no negative array subscripts in the source.
+- The mixed-tool cases (`flock(1)` holder vs perl run, the reverse, six
+  concurrent mixed runs) need a real `flock(1)`. They are skipped with a stated
   reason on hosts without one (stock macOS), and the bin builder refuses to
-  silently drop a requested tool.
+  silently drop a requested tool. They therefore run only on a host that has
+  `flock` and runs vitest; the current CI does not run them (the macOS job
+  skips them and the Docker job does not run vitest).
 - New install-hooks tests: a 0600 settings file stays 0600 under umask 022 with
   no temp file left; a loose-mode temp file left by a crashed run is replaced;
   a symlink planted at the temp path is not written through.
@@ -83,6 +87,8 @@ Out of scope:
 ## Follow-ups
 
 - Spend ledger `ENOENT` on a fresh runner (non-fatal).
+- Run the mixed-tool lock tests in CI (for example install a `flock(1)` on the
+  macOS runner, or run vitest in the Linux job); no CI job runs them today.
 - `_log.sh` uses GNU-only `date` `%3N` (milliseconds); BSD `date` prints a
   literal `3N`. Not changed here; it does not fail tests but log timestamps
   are wrong on macOS.
@@ -181,7 +187,7 @@ Out of scope:
   retries removal (`maxRetries`); the same code passed in the next run, so it
   was a flake rather than a product bug.
 
-### 2026-10-15: third review round
+### 2026-10-15: review round 4
 - What changed: the three mixed-tool tests are skipped when the host has no
   `flock(1)` and the test bin builder throws if a requested `flock` or `perl`
   is missing; perl reports a non-contention `flock` error as 3, which takes the
@@ -196,3 +202,14 @@ Out of scope:
 - Left alone: the antigravity teardown retry (acceptable as is; waiting for the
   detached rebuild would be a larger test change).
 - Supersedes: the "still replaced atomically" claim for the unlocked path.
+
+### 2026-10-15: review round 5
+- What changed: the splice and the `live-state.json` write now remove their
+  temp files if the write or the rename fails (a failed step returns non-zero
+  as before); two tests cover that. Wording corrected: the mixed-tool lock
+  tests run only on a host with `flock` and are not run by the current CI;
+  running them in CI is listed as a follow-up. REVIEW.md corrected and given a
+  round 5 section. This heading and the one above now match the numbering in
+  REVIEW.md.
+- Why: see REVIEW.md round 5.
+- Supersedes: the "third review round" label of the entry above.
