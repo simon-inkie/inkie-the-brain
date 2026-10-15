@@ -173,12 +173,13 @@ write_state() {
     local is_string="${3:-false}"
     local tmp
     tmp="$(mktemp "$LIVE_STATE_FILE.XXXXXX")" # same directory, so mv is a rename
+    # A failed write or rename must not leave the temp file beside the state.
     if [ "$is_string" = "true" ]; then
-        jq --arg v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp"
+        jq --arg v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp" || { rm -f "$tmp"; return 1; }
     else
-        jq --argjson v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp"
+        jq --argjson v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp" || { rm -f "$tmp"; return 1; }
     fi
-    mv "$tmp" "$LIVE_STATE_FILE"
+    mv "$tmp" "$LIVE_STATE_FILE" || { rm -f "$tmp"; return 1; }
 }
 
 HOT_K=$(read_state hotReflectionCount)
@@ -696,9 +697,9 @@ splice_into_memory() {
             }
             if (!in_block) { print }
         }
-    ' "$memory_file" > "$tmp"
+    ' "$memory_file" > "$tmp" || { rm -f "$tmp" "$block_file"; return 1; }
 
-    mv "$tmp" "$memory_file"
+    mv "$tmp" "$memory_file" || { rm -f "$tmp" "$block_file"; return 1; }
     rm -f "$block_file"
 }
 

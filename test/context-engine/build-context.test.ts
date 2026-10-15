@@ -597,7 +597,9 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
 
   // The mixed-tool cases need a real flock(1) on the host (stock macOS has
   // none). They are skipped there, with a stated reason, instead of quietly
-  // degrading to perl-against-perl.
+  // degrading to perl-against-perl. They run only on hosts that have flock
+  // (a Linux machine running vitest); the current CI does not run them: the
+  // macOS job skips them and the Docker job does not run vitest.
   let hostFlock = false;
   try {
     execFileSync("sh", ["-c", "command -v flock"], { stdio: "ignore" });
@@ -872,6 +874,35 @@ exec "${realJq}" "$@"
     await runMac();
     const { readdir } = await import("node:fs/promises");
     expect((await readdir(workspaceDir)).filter((f) => f.startsWith("MEMORY.md."))).toEqual([]);
+    expect((await readdir(memoryDir)).filter((f) => f.startsWith("live-state.json."))).toEqual([]);
+  });
+
+  it("cleans up its temp files when the splice fails", async () => {
+    await writeMemoryMd(ANCHORED);
+    // awk is only used by the splice; make it fail.
+    await rm(join(macBin, "awk"));
+    await writeFile(join(macBin, "awk"), "#!/bin/sh\nexit 1\n");
+    await chmod(join(macBin, "awk"), 0o755);
+
+    await expect(runMac()).rejects.toThrow();
+    const { readdir } = await import("node:fs/promises");
+    expect((await readdir(workspaceDir)).filter((f) => f.startsWith("MEMORY.md."))).toEqual([]);
+    expect(await readMemoryMd()).toBe(ANCHORED);
+  });
+
+  it("cleans up its temp file when a live-state.json write fails", async () => {
+    await writeMemoryMd(ANCHORED);
+    // Reads (jq -r) work; the --arg/--argjson writes fail.
+    const realJq = await which("jq");
+    await rm(join(macBin, "jq"));
+    await writeFile(
+      join(macBin, "jq"),
+      `#!/bin/sh\ncase "$1" in -r) exec "${realJq}" "$@" ;; *) exit 1 ;; esac\n`,
+    );
+    await chmod(join(macBin, "jq"), 0o755);
+
+    await expect(runMac()).rejects.toThrow();
+    const { readdir } = await import("node:fs/promises");
     expect((await readdir(memoryDir)).filter((f) => f.startsWith("live-state.json."))).toEqual([]);
   });
 
