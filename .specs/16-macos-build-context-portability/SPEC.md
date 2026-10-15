@@ -1,7 +1,6 @@
 # #16: install-test fails every day on macOS: build-context tests fail
 
 - Issue: #16
-- Branch: claude/brain-16-macos-l1
 - Started: 2026-10-14
 
 ## TL;DR
