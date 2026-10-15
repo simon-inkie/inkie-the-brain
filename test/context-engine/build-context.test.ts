@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, writeFile, readFile, rm, chmod, access, symlink, utimes } from "node:fs/promises";
 import { constants } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -590,7 +590,7 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
   const NEEDED_TOOLS = [
     "bash", "jq", "find", "sort", "grep", "awk", "mktemp", "mv", "rm", "cat",
     "dirname", "basename", "ln", "date", "mkdir", "kill", "head", "tail", "sed",
-    "tr", "wc", "cut", "env", "touch", "chmod", "sleep", "rmdir",
+    "tr", "wc", "cut", "env", "touch", "chmod", "sleep",
   ];
 
   let macBin: string;
@@ -608,17 +608,24 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
     return undefined;
   }
 
-  beforeEach(async () => {
-    macBin = join(testDir, "macbin");
-    await mkdir(macBin, { recursive: true });
-    for (const tool of NEEDED_TOOLS) {
+  /** A PATH directory of symlinks to the real tools, plus the BSD-style stat shim. */
+  async function makeBin(
+    name: string,
+    opts: { flock: boolean; perl: boolean },
+  ): Promise<string> {
+    const dir = join(testDir, name);
+    await mkdir(dir, { recursive: true });
+    const tools = [...NEEDED_TOOLS];
+    if (opts.flock) tools.push("flock");
+    if (opts.perl) tools.push("perl");
+    for (const tool of tools) {
       const real = await which(tool);
-      if (real) await symlink(real, join(macBin, tool));
+      if (real) await symlink(real, join(dir, tool));
     }
-    // BSD stat: `-c` is an illegal option, `-f %m` prints the mtime.
-    // The real stat is GNU on Linux (-c %Y) and BSD on macOS (-f %m); probe it
-    // once here and bake the working form into the shim, so the shim never
-    // falls back per call.
+    // BSD stat: `-c` is an illegal option, `-f %m` prints the mtime. The real
+    // stat is GNU on Linux (-c %Y) and BSD on macOS (-f %m); probe it once here
+    // and bake the working form into the shim, so the shim never falls back
+    // per call.
     const realStat = (await which("stat"))!;
     let realMtime: string;
     try {
@@ -628,7 +635,7 @@ describe("build-context.sh without flock and with BSD stat (macOS)", () => {
       realMtime = `-f %m`;
     }
     await writeFile(
-      join(macBin, "stat"),
+      join(dir, "stat"),
       `#!/bin/sh
 if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then
   exec "${realStat}" ${realMtime} "$3"
@@ -637,7 +644,13 @@ echo "stat: illegal option -- c" >&2
 exit 1
 `,
     );
-    await chmod(join(macBin, "stat"), 0o755);
+    await chmod(join(dir, "stat"), 0o755);
+    return dir;
+  }
+
+  beforeEach(async () => {
+    // Stock macOS: perl, no flock.
+    macBin = await makeBin("macbin", { flock: false, perl: true });
   });
 
   async function runMac(): Promise<{ stdout: string; stderr: string }> {
@@ -685,107 +698,198 @@ exit 1
     await writeMemoryMd(ANCHORED);
     await runMac();
     await writeMemoryMd(ANCHORED);
-    await runMac();
-    expect(await readMemoryMd()).not.toContain("stale live block");
-    await expect(access(join(memoryDir, ".live-block.lock.d"))).rejects.toThrow();
-  });
-
-  it("skips (exit 0, MEMORY.md untouched) while a live process holds the lock", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    await mkdir(lockDir);
-    await writeFile(join(lockDir, "pid"), String(process.pid));
-
     const { stderr } = await runMac();
-    expect(stderr).toContain("another instance is running");
-    expect(await readMemoryMd()).toBe(ANCHORED);
-  });
-
-  it("reclaims a lock left behind by a process that no longer exists", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    await mkdir(lockDir);
-    await writeFile(join(lockDir, "pid"), "2147483646");
-
-    await runMac();
+    expect(stderr).not.toContain("another instance is running");
     expect(await readMemoryMd()).not.toContain("stale live block");
   });
 
-  it("reclaims a pid-less lock once it is old (owner killed before writing its pid)", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    await mkdir(lockDir);
-    const old = new Date(Date.now() - 60_000);
-    await utimes(lockDir, old, old);
+  /**
+   * Locking. The lock is an flock(2) lock on fd 9, taken with flock(1) when
+   * the PATH has it and with perl otherwise, so there is no pid file, no stale
+   * lock to reclaim and nothing a live owner can lose. The tests below pause a
+   * run at a controlled point while it holds the lock (the first jq call is
+   * gated on a file) and check what other runs do meanwhile.
+   */
+  interface Holder {
+    done: Promise<number | null>;
+    pid: number;
+  }
 
-    await runMac();
-    expect(await readMemoryMd()).not.toContain("stale live block");
-  });
+  async function waitForFile(path: string, ms = 10000): Promise<void> {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      try {
+        await access(path);
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    throw new Error(`timed out waiting for ${path}`);
+  }
 
-  it("does not reclaim a fresh pid-less lock (its owner may be mid-start)", async () => {
-    await writeMemoryMd(ANCHORED);
-    await mkdir(join(memoryDir, ".live-block.lock.d"));
-
-    const { stderr } = await runMac();
-    expect(stderr).toContain("another instance is running");
-    expect(await readMemoryMd()).toBe(ANCHORED);
-  });
-
-  it("clears a stale reclaim guard (reclaimer killed), then the next run reclaims the lock", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    const guardDir = join(memoryDir, ".live-block.lock.reclaim");
-    await mkdir(lockDir);
-    await writeFile(join(lockDir, "pid"), "2147483646");
-    await mkdir(guardDir);
-    const old = new Date(Date.now() - 120_000);
-    await utimes(guardDir, old, old);
-
-    // First run only clears the guard and skips cleanly (exit 0).
-    const first = await runMac();
-    expect(first.stderr).toContain("another instance is running");
-    await expect(access(guardDir)).rejects.toThrow();
-    expect(await readMemoryMd()).toBe(ANCHORED);
-
-    await runMac();
-    expect(await readMemoryMd()).not.toContain("stale live block");
-  });
-
-  it("leaves a fresh reclaim guard alone and skips", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    const guardDir = join(memoryDir, ".live-block.lock.reclaim");
-    await mkdir(lockDir);
-    await writeFile(join(lockDir, "pid"), "2147483646");
-    await mkdir(guardDir);
-
-    const { stderr } = await runMac();
-    expect(stderr).toContain("another instance is running");
-    await access(guardDir);
-    expect(await readMemoryMd()).toBe(ANCHORED);
-  });
-
-  it("concurrent runs over a stale lock yield exactly one holder", async () => {
-    await writeMemoryMd(ANCHORED);
-    const lockDir = join(memoryDir, ".live-block.lock.d");
-    await mkdir(lockDir);
-    await writeFile(join(lockDir, "pid"), "2147483646");
-
-    // Slow jq so the winner holds the lock long enough that every other run
-    // starts while it is held. A second holder would show as fewer than
-    // N-1 skips; a loser exiting non-zero rejects the promise.
+  /** A bin dir like macBin, with the first jq call paused until gate/release. */
+  async function gatedBin(name: string, withFlock: boolean): Promise<string> {
+    const dir = await makeBin(name, { flock: withFlock, perl: true });
     const realJq = await which("jq");
-    await rm(join(macBin, "jq"));
-    await writeFile(join(macBin, "jq"), `#!/bin/sh\nsleep 0.4\nexec "${realJq}" "$@"\n`);
-    await chmod(join(macBin, "jq"), 0o755);
+    await rm(join(dir, "jq"));
+    const gate = join(testDir, "gate");
+    await mkdir(gate, { recursive: true });
+    await writeFile(
+      join(dir, "jq"),
+      `#!/bin/sh
+if [ ! -e "${gate}/started" ]; then
+  : > "${gate}/started"
+  i=0
+  while [ ! -e "${gate}/release" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done
+fi
+exec "${realJq}" "$@"
+`,
+    );
+    await chmod(join(dir, "jq"), 0o755);
+    return dir;
+  }
 
-    const N = 6;
-    const results = await Promise.all(Array.from({ length: N }, () => runMac()));
-    const skipped = results.filter((r) =>
-      r.stderr.includes("another instance is running"),
-    ).length;
-    expect(skipped).toBe(N - 1);
+  function startHolder(binDir: string): Holder {
+    const child = spawn("/bin/bash", [join(toolsDir, "build-context.sh")], {
+      env: { ...process.env, PATH: binDir },
+      detached: true, // own process group, so the whole run can be killed
+      stdio: "ignore",
+    });
+    const done = new Promise<number | null>((resolve) => child.on("exit", resolve));
+    return { done, pid: child.pid! };
+  }
+
+  async function release(): Promise<void> {
+    await writeFile(join(testDir, "gate", "release"), "");
+  }
+
+  async function runIn(binDir: string): Promise<{ stdout: string; stderr: string }> {
+    return execFileAsync("/bin/bash", [join(toolsDir, "build-context.sh")], {
+      env: { ...process.env, PATH: binDir },
+      timeout: 10000,
+    });
+  }
+
+  it("a run paused while holding the lock keeps it: others skip, then it finishes", async () => {
+    await writeMemoryMd(ANCHORED);
+    const holderBin = await gatedBin("holder-bin", false);
+    const holder = startHolder(holderBin);
+    await waitForFile(join(testDir, "gate", "started"));
+
+    // Several contenders while the holder is paused (this is the interval in
+    // which a pid-file lock could be judged stale).
+    for (let i = 0; i < 3; i++) {
+      const { stderr } = await runMac();
+      expect(stderr).toContain("another instance is running");
+      expect(await readMemoryMd()).toBe(ANCHORED);
+    }
+
+    await release();
+    expect(await holder.done).toBe(0);
     expect(await readMemoryMd()).not.toContain("stale live block");
+
+    // Lock released on exit: the next run is a normal run.
+    await writeMemoryMd(ANCHORED);
+    const next = await runMac();
+    expect(next.stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("a holder killed at the pause point frees the lock with no reclaim step", async () => {
+    await writeMemoryMd(ANCHORED);
+    const holderBin = await gatedBin("holder-bin", false);
+    const holder = startHolder(holderBin);
+    await waitForFile(join(testDir, "gate", "started"));
+
+    process.kill(-holder.pid, "SIGKILL");
+    await holder.done;
+
+    const { stderr } = await runMac();
+    expect(stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("mixed PATH: a flock(1) holder excludes a perl-only run", async () => {
+    await writeMemoryMd(ANCHORED);
+    const holder = startHolder(await gatedBin("with-flock", true));
+    await waitForFile(join(testDir, "gate", "started"));
+
+    const { stderr } = await runMac(); // macBin has perl but no flock
+    expect(stderr).toContain("another instance is running");
+    expect(await readMemoryMd()).toBe(ANCHORED);
+
+    await release();
+    expect(await holder.done).toBe(0);
+  });
+
+  it("mixed PATH: a perl-only holder excludes a flock(1) run", async () => {
+    await writeMemoryMd(ANCHORED);
+    const holder = startHolder(await gatedBin("perl-only", false));
+    await waitForFile(join(testDir, "gate", "started"));
+
+    const flockBin = await makeBin("flock-bin", { flock: true, perl: false });
+    const { stderr } = await runIn(flockBin);
+    expect(stderr).toContain("another instance is running");
+    expect(await readMemoryMd()).toBe(ANCHORED);
+
+    await release();
+    expect(await holder.done).toBe(0);
+  });
+
+  it("with neither flock nor perl it still rebuilds, and says it has no lock", async () => {
+    await writeMemoryMd(ANCHORED);
+    const bareBin = await makeBin("bare-bin", { flock: false, perl: false });
+    const { stderr } = await runIn(bareBin);
+    expect(stderr).toContain("no usable file lock");
+    expect(stderr).not.toContain("another instance is running");
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("concurrent runs over mixed PATHs yield exactly one holder", async () => {
+    await writeMemoryMd(ANCHORED);
+    const flockBin = await gatedBin("g-flock", true);
+    const perlBin = await gatedBin("g-perl", false);
+
+    // Every run uses a bin whose first jq call is gated; only the winner gets
+    // that far. Start six runs, alternating the two lock tools.
+    const children = Array.from({ length: 6 }, (_, i) => {
+      const out: string[] = [];
+      const child = spawn("/bin/bash", [join(toolsDir, "build-context.sh")], {
+        env: { ...process.env, PATH: i % 2 ? flockBin : perlBin },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      child.stderr!.on("data", (d) => out.push(String(d)));
+      const done = new Promise<{ code: number | null; err: string }>((resolve) =>
+        child.on("exit", (code) => resolve({ code, err: out.join("") })),
+      );
+      return done;
+    });
+
+    await waitForFile(join(testDir, "gate", "started"));
+    await new Promise((r) => setTimeout(r, 500)); // let the five losers skip
+    await release();
+    const results = await Promise.all(children);
+
+    expect(results.every((r) => r.code === 0)).toBe(true);
+    const skipped = results.filter((r) => r.err.includes("another instance is running"));
+    expect(skipped).toHaveLength(5);
+    expect(await readMemoryMd()).not.toContain("stale live block");
+  });
+
+  it("an unreadable mtime defaults to 0 instead of aborting the rebuild", async () => {
+    await writeMemoryMd(ANCHORED);
+    await addReflection("2026-06-20", "A reflection about macOS");
+    await addObservation("2026-06-21-09-00", "A fresh observation about macOS");
+    // A stat that supports neither flavour: file_mtime fails with no output.
+    await writeFile(join(macBin, "stat"), "#!/bin/sh\nexit 1\n");
+
+    const { stderr } = await runMac();
+    expect(stderr).not.toContain("integer expression expected");
+    expect(stderr).not.toContain("unbound variable");
+    const result = await readMemoryMd();
+    expect(result).not.toContain("stale live block");
+    expect(result).toContain("A reflection about macOS");
   });
 
   it("uses no negative array subscripts (bash 3.2 rejects ${arr[-1]})", async () => {

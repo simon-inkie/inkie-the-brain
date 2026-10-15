@@ -151,6 +151,45 @@ describe("install-hooks.mjs", () => {
     expect(JSON.parse(readFileSync(real, "utf-8")).theme).toBe("dark");
   });
 
+  it("keeps a 0600 settings file 0600 under umask 022 and leaves no temp file", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ secret: "s3cret" }));
+    chmodSync(settings, 0o600);
+    const r = spawnSync(
+      "sh",
+      ["-c", `umask 022; exec node "$0" --settings "$1" --dist "$2"`,
+        join(repoRoot, "scripts", "install-hooks.mjs"), settings, dist],
+      { encoding: "utf-8" },
+    );
+    expect(r.status).toBe(0);
+    expect(statSync(settings).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${settings}.the-brain.tmp`)).toBe(false);
+  });
+
+  it("replaces a loose-mode temp file left by a crashed run instead of reusing it", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ secret: "s3cret" }));
+    chmodSync(settings, 0o600);
+    const stale = `${settings}.the-brain.tmp`;
+    writeFileSync(stale, "stale");
+    chmodSync(stale, 0o666);
+    expect(run().status).toBe(0);
+    expect(existsSync(stale)).toBe(false);
+    expect(statSync(settings).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(settings, "utf-8")).secret).toBe("s3cret");
+  });
+
+  it("does not write through a symlink planted at the temp path", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ a: 1 }));
+    const victim = join(dir, "victim.txt");
+    writeFileSync(victim, "untouched");
+    symlinkSync(victim, `${settings}.the-brain.tmp`);
+    expect(run().status).toBe(0);
+    expect(readFileSync(victim, "utf-8")).toBe("untouched");
+    expect(JSON.parse(readFileSync(settings, "utf-8")).hooks.Stop).toHaveLength(1);
+  });
+
   it("exits 3 on invalid JSON and leaves the file byte-identical", () => {
     mkdirSync(dirname(settings), { recursive: true });
     writeFileSync(settings, "{ not json");

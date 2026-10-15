@@ -15,8 +15,8 @@
 # is preserved byte-for-byte. This is a permanent runtime concurrency contract,
 # not a one-shot dev guarantee.
 #
-# Atomic against concurrent invocations of itself: flock on memory/.live-block.lock,
-# or an mkdir lock directory (memory/.live-block.lock.d) where flock is absent.
+# Atomic against concurrent invocations of itself via an flock(2) lock on
+# memory/.live-block.lock (taken with flock(1) or perl; see the lock block).
 #
 # Called automatically by observe.sh and reflect.sh; can also be invoked manually.
 
@@ -78,19 +78,51 @@ ANCHOR_END="<!-- IO_LIVE_END -->"
 
 # --- Single-instance lock (skipped in --emit mode: pure read, no contention) ---
 #
-# flock where available; an mkdir lock directory where it is not (stock macOS).
-# The mkdir path is exclusive in normal operation and when a holder dies
-# (stale lock reclaim is serialised). Known limitation, best effort only: if a
-# run is killed in the middle of reclaiming, its guard is cleared after 30s by
-# an age check followed by a rename that are not one atomic step, so a run
-# stalled for over 30s at exactly that point could remove a fresh guard. No
-# path in this section exits non-zero; every failure is a skip (exit 0).
+# One protocol on every host: an advisory flock(2) lock on the open file
+# description behind fd 9 (memory/.live-block.lock). The kernel releases it
+# when the last process holding that descriptor exits, so there is no pid
+# file, no stale-lock reclaim and nothing a live owner can lose. The lock is
+# taken with flock(1) when the PATH has it, otherwise with perl (shipped with
+# stock macOS); both call flock(2) on the same fd, so a run that found one tool
+# and a run that found the other exclude each other. If neither tool is
+# available the run proceeds WITHOUT a lock and says so on stderr: MEMORY.md is
+# still replaced atomically (temp file + rename), the lock only avoids
+# duplicate work, and skipping would be the silent no-op this fixes.
+# Exit status of an acquire attempt: 0 = acquired, 1 = held by another run,
+# anything else = lock tooling unavailable or failed.
+
+acquire_lock() {
+    local rc=0
+    if command -v flock >/dev/null 2>&1; then
+        flock -n 9 || rc=$?
+    elif command -v perl >/dev/null 2>&1; then
+        perl -e 'use Fcntl qw(:flock); open(my $fh, "<&=", 9) or exit 2;
+                 exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1)' || rc=$?
+    else
+        rc=127
+    fi
+    return "$rc"
+}
+
+if [ "$EMIT_MODE" != "true" ]; then
+    if { exec 9>"$LOCK_FILE"; } 2>/dev/null; then
+        lock_rc=0
+        acquire_lock || lock_rc=$?
+        if [ "$lock_rc" -eq 1 ]; then
+            echo "build-context.sh: another instance is running, skipping" >&2
+            exit 0
+        elif [ "$lock_rc" -ne 0 ]; then
+            echo "build-context.sh: no usable file lock (flock or perl), continuing without one" >&2
+        fi
+    else
+        echo "build-context.sh: cannot open $LOCK_FILE, continuing without a lock" >&2
+    fi
+fi
 
 # Detect the stat flavour once. GNU stat takes -c %Y; BSD stat takes -f %m.
 # Probing per call would be unsafe: on GNU stat -f means filesystem status and
-# %m is read as a filename, so a path that vanished between two calls would
-# print a multi-line block instead of failing. file_mtime prints the mtime in
-# epoch seconds, or fails (prints nothing) so callers can skip safely.
+# %m is read as a file name. file_mtime prints the mtime in epoch seconds, or
+# fails with no output; callers default a missing mtime to 0 (see mtime_of).
 if stat -c %Y . >/dev/null 2>&1; then
     file_mtime() { stat -c %Y "$1" 2>/dev/null; }
 elif stat -f %m . >/dev/null 2>&1; then
@@ -99,79 +131,14 @@ else
     file_mtime() { return 1; }
 fi
 
-# Seconds since $1 was last modified. Fails (so the caller treats the path as
-# NOT old) if its mtime cannot be read as a number.
-path_age() {
-    local mt now
-    mt="$(file_mtime "$1")" || return 1
-    case "$mt" in ''|*[!0-9]*) return 1 ;; esac
-    now="$(date +%s)" || return 1
-    echo $(( now - mt ))
+# mtime of $1 as an integer, 0 if it cannot be read (e.g. the file vanished
+# between listing and stat), so numeric comparisons never see an empty string.
+mtime_of() {
+    local mt
+    mt="$(file_mtime "$1" || true)"
+    case "$mt" in ''|*[!0-9]*) mt=0 ;; esac
+    echo "$mt"
 }
-
-skip_locked() {
-    echo "build-context.sh: another instance is running, skipping" >&2
-    exit 0
-}
-
-# True when the mkdir lock at $1 belongs to nobody: its recorded pid is gone,
-# or it has no pid yet and is older than a few seconds (its owner was killed
-# between mkdir and the pid write).
-lock_is_stale() {
-    local dir="$1" pid age
-    pid="$(cat "$dir/pid" 2>/dev/null || true)"
-    if [ -n "$pid" ]; then
-        ! kill -0 "$pid" 2>/dev/null
-        return
-    fi
-    age="$(path_age "$dir")" || return 1
-    [ "$age" -ge 5 ]
-}
-
-if [ "$EMIT_MODE" != "true" ]; then
-    if command -v flock >/dev/null 2>&1; then
-        exec 9>"$LOCK_FILE"
-        if ! flock -n 9; then
-            skip_locked
-        fi
-    else
-        LOCK_DIR="$LOCK_FILE.d"
-        GUARD_DIR="$LOCK_FILE.reclaim"
-        LOCK_HELD=false
-        # Only the run that created the lock directory may remove it.
-        trap 'if [ "$LOCK_HELD" = "true" ]; then rm -rf "$LOCK_DIR"; fi' EXIT
-        if mkdir "$LOCK_DIR" 2>/dev/null; then
-            LOCK_HELD=true
-        elif lock_is_stale "$LOCK_DIR"; then
-            # Reclaiming a dead lock. Reclaimers are serialised by a guard
-            # directory, and the stale lock is renamed away (not deleted in
-            # place) so a lock created by another run in the meantime is
-            # never removed. Whoever loses any step skips like a busy lock.
-            if mkdir "$GUARD_DIR" 2>/dev/null; then
-                if lock_is_stale "$LOCK_DIR" \
-                    && mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null; then
-                    rm -rf "$LOCK_DIR.stale.$$"
-                fi
-                if mkdir "$LOCK_DIR" 2>/dev/null; then
-                    LOCK_HELD=true
-                fi
-                rmdir "$GUARD_DIR" 2>/dev/null || true
-            elif age="$(path_age "$GUARD_DIR")" && [ "$age" -ge 30 ] \
-                && mv "$GUARD_DIR" "$GUARD_DIR.stale.$$" 2>/dev/null; then
-                # A reclaimer was killed mid-reclaim. Clear its guard (renamed
-                # away, then removed) so a later run can reclaim. This run
-                # still skips. Best effort: see the limitation note above.
-                rm -rf "$GUARD_DIR.stale.$$"
-            fi
-        fi
-        if [ "$LOCK_HELD" != "true" ]; then
-            skip_locked
-        fi
-        # If the pid cannot be written the lock still holds; an old pid-less
-        # lock is reclaimed by lock_is_stale, so never fail the run here.
-        echo "$$" > "$LOCK_DIR/pid" 2>/dev/null || true
-    fi
-fi
 
 # --- Sanity checks (--emit needs no MEMORY.md: it never splices) ---
 
@@ -317,7 +284,7 @@ fi
 
 LATEST_REFL_MTIME=0
 if [ "$REFL_COUNT" -gt 0 ]; then
-    LATEST_REFL_MTIME=$(file_mtime "${REFLECTIONS[$((REFL_COUNT - 1))]}")
+    LATEST_REFL_MTIME=$(mtime_of "${REFLECTIONS[$((REFL_COUNT - 1))]}")
 fi
 
 UNPROCESSED_FILES=()
@@ -327,7 +294,7 @@ done < <(find "$OBS_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
 
 UNPROCESSED_NEW=()
 for f in ${UNPROCESSED_FILES[@]+"${UNPROCESSED_FILES[@]}"}; do
-    F_MTIME=$(file_mtime "$f")
+    F_MTIME=$(mtime_of "$f")
     if [ "$F_MTIME" -gt "$LATEST_REFL_MTIME" ]; then
         UNPROCESSED_NEW+=("$f")
     fi

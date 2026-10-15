@@ -16,13 +16,23 @@ which broke the `--emit` and `--cached` paths that the antigravity
 PreInvocation hook uses. All four are fixed in the script; regression tests run
 it on Linux with `flock` hidden and a BSD-style `stat`.
 
+The lock is now one protocol on every host: an flock(2) lock on the lock file's
+descriptor, taken with `flock(1)` when available and with `perl` (shipped with
+macOS) otherwise. The kernel drops it when the holder exits, so there is no pid
+file or stale-lock reclaim, a live owner cannot lose its lock, and runs that
+found different tools still exclude each other. With neither tool the run
+proceeds unlocked and says so on stderr.
+
 Not verified here: a real macOS run (see Test plan). The acceptance criterion
 of three green scheduled runs on `main` can only be met after merge.
 
 ## Scope
 
 In scope:
-- `build-context.sh`: portable lock, `stat`, array handling.
+- `build-context.sh`: portable lock, `stat`, array handling, mtime defaults.
+- `scripts/install-hooks.mjs`: create the temp settings file exclusively with
+  mode 0600 before writing (review finding on the code path this branch
+  inherits from #11), with tests.
 - Regression tests in `test/context-engine/build-context.test.ts`.
 - CHANGELOG entry.
 
@@ -35,9 +45,18 @@ Out of scope:
 ## Test plan
 
 - `pnpm exec vitest run` on Linux: all suites pass.
-- New tests (4 of 6 fail on the old script): without `flock` the block is
-  rebuilt, lock is released, a live lock skips, a dead lock is reclaimed; no
-  negative array subscripts in the source.
+- New build-context tests (run under `/bin/bash` on a PATH without `flock` and
+  with a BSD-style `stat`): rebuild instead of skipping; lock released at exit;
+  a run paused while holding the lock (controlled gate at its first `jq` call)
+  keeps it against three contenders and then finishes; a holder killed at the
+  pause point frees the lock with no reclaim step; mixed PATH in both
+  directions (`flock(1)` holder vs perl-only run, and the reverse); neither
+  tool available (rebuilds, warns); six concurrent runs over mixed PATHs give
+  exactly five skips; an unreadable mtime defaults to 0 with no numeric error;
+  no negative array subscripts in the source.
+- New install-hooks tests: a 0600 settings file stays 0600 under umask 022 with
+  no temp file left; a loose-mode temp file left by a crashed run is replaced;
+  a symlink planted at the temp path is not written through.
 - Not run: macOS and bash 3.2 (no macOS or bash 3.2 available in the sandbox;
   bash 3.2 sources and the Docker daemon were unreachable). The empty-array
   guards use the bash 3.2 safe `${a[@]+"${a[@]}"}` form, reviewed by reading,
@@ -48,12 +67,11 @@ Out of scope:
 
 ## Known limitations
 
-- The `mkdir` lock (used only where `flock` is absent) is exclusive in normal
-  operation and when a holder dies. After a reclaimer is killed mid-reclaim,
-  its guard is cleared after 30s by an age check plus a rename that are not one
-  atomic step, so a run stalled for over 30s at exactly that point could remove
-  a fresh guard. This is best effort. Every failure on these paths is a skip
-  (exit 0), never a non-zero exit.
+- The lock is advisory and per host (flock(2) on a local file). A child
+  process that inherits fd 9 and outlives the run keeps the lock until it
+  exits, as with `flock(1)` before this change.
+- With neither `flock` nor `perl` on the PATH the run is unlocked (it warns).
+  MEMORY.md is still replaced atomically; only duplicate work is possible.
 
 ## Follow-ups
 
@@ -123,3 +141,30 @@ Out of scope:
   per-call fallback could exit 1 under `set -u`, and the guard clearing was not
   atomic.
 - Supersedes: the guard-clearing description in the "review fixes" entry.
+
+### 2026-10-15: one kernel lock protocol, install-hooks permissions
+- What changed: the `mkdir` lock, pid file, guard directory and age-based
+  stale handling are removed. The lock is a flock(2) lock on fd 9
+  (`memory/.live-block.lock`), acquired with `flock(1)` if present, else with
+  perl; exit status 1 means held (skip, exit 0), anything else means no usable
+  lock tooling and the run continues with a warning. `file_mtime` remains a
+  probe-once helper; a new `mtime_of` defaults an unreadable mtime to 0 at both
+  call sites (latest reflection, each observation). `install-hooks.mjs` creates
+  its temp file with `wx` and mode 0600 before writing, removes a leftover temp
+  file first, then applies the final mode before the rename.
+- Why: review found (1) a live owner could lose a pid-file lock if another run
+  judged it stale in the window around pid publication, (2) the `flock` and
+  `mkdir` paths did not exclude each other when two runs saw different PATHs,
+  (3) the settings temp file was briefly readable under a loose umask, and (4)
+  an empty mtime broke the numeric comparison. A kernel lock has none of the
+  stale-lock states, so the first two cannot occur, and the earlier
+  best-effort limitation about clearing a stale guard no longer applies.
+- Dead ends: keeping the `mkdir` lock and publishing the pid atomically via a
+  symlink still needed a compare-and-delete to reclaim a dead owner, which has
+  the same window; it was dropped in favour of the kernel lock.
+- Branch history: `origin/main` has not moved since this branch was created, so
+  merging it is a no-op and the branch diff against `main` is the #16 files
+  only (SPEC, CHANGELOG, `build-context.sh`, its test, plus the install-hooks
+  change and test above).
+- Supersedes: the lock descriptions and the Known limitations of the earlier
+  entries; those entries stay as written.
