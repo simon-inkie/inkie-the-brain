@@ -69,3 +69,13 @@ the review of head `946d89d`, "round 5" the review of head `ca11aad`.
 | A failed write leaves `MEMORY.md.XXXXXX` or `live-state.json.XXXXXX` next to user files | Nit | Fixed: the splice and the state write remove their temp files on failure (still returning non-zero); two tests added | 0f0d093, plus the docs commit that adds this section |
 | Commit identity wording in this log | Nit | Made generic ("the default configured identity") | 0f0d093, plus the docs commit that adds this section |
 | Commit identity itself | Maintainer's decision | Nothing done | n/a |
+
+## Round 8: review of head 12d5b7b (lock design judged sound)
+
+Numbering follows the maintainer's count of review rounds.
+
+| Finding | Severity | Outcome | Commit |
+|---|---|---|---|
+| The lock pause test gated the first `jq` call, after the old design had already published its owner id, so it never exercised the vulnerable interval | unlabelled | Fixed: the test pauses at the lock step itself (after the lock exists, held 5.5s) and a second test pauses after opening the lock file but before locking; the mixed-tool cases keep running when the host has `flock`; the new test was run against the earlier directory-lock script and fails there | cd13182, plus the docs commit that adds this section |
+| The permission test checked only the final mode, so the old code (which briefly exposed the contents) also passed | unlabelled | Fixed: a test records the temp file's mode when contents are written (a preload wrapping the fs write calls) and fails against the earlier code | cd13182, plus the docs commit that adds this section |
+| The SPEC said the diff has only the issue's files | unlabelled | Corrected to the actual 8 files, with the reason the install-hooks and test-helper files are there | cd13182, plus the docs commit that adds this section |

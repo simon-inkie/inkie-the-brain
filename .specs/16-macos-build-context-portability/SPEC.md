@@ -48,8 +48,10 @@ Out of scope:
 - `pnpm exec vitest run` on Linux: all suites pass.
 - New build-context tests (run under `/bin/bash` on a PATH without `flock` and
   with a BSD-style `stat`): rebuild instead of skipping; lock released at exit;
-  a run paused while holding the lock (controlled gate at its first `jq` call)
-  keeps it against three contenders and then finishes; a holder killed at the
+  a run paused right after it takes the lock (controlled gate at the lock step,
+  held for 5.5s, past the old 5s staleness limit) keeps it against three
+  contenders and then finishes; a run paused after opening the lock file but
+  before locking neither blocks nor corrupts; a holder killed at the
   pause point frees the lock with no reclaim step; mixed PATH in both
   directions (`flock(1)` holder vs perl-only run, and the reverse); neither
   tool available (rebuilds, warns); a non-contention flock failure (warns,
@@ -176,9 +178,15 @@ Out of scope:
   symlink still needed a compare-and-delete to reclaim a dead owner, which has
   the same window; it was dropped in favour of the kernel lock.
 - Branch history: `origin/main` has not moved since this branch was created, so
-  merging it is a no-op and the branch diff against `main` is the #16 files
-  only (SPEC, CHANGELOG, `build-context.sh`, its test, plus the install-hooks
-  change and test above).
+  merging it is a no-op. The branch diff against `main` is exactly these 8
+  files: `.specs/16-macos-build-context-portability/SPEC.md`,
+  `.specs/16-macos-build-context-portability/REVIEW.md`, `CHANGELOG.md`,
+  `adapters/openclaw/hooks/memory-tools/build-context.sh`,
+  `scripts/install-hooks.mjs`, `test/antigravity/helpers.ts`,
+  `test/context-engine/build-context.test.ts` and
+  `test/scripts/install-hooks.test.ts`. The install-hooks and antigravity helper
+  changes come from review findings and CI flakes, not from the issue's own
+  scope (the build-context portability fix).
 - Supersedes: the lock descriptions and the Known limitations of the earlier
   entries; those entries stay as written.
 - Also: macOS CI run 166 failed once in `antigravity/on-stop.test.ts` teardown
@@ -213,3 +221,25 @@ Out of scope:
   REVIEW.md.
 - Why: see REVIEW.md round 5.
 - Supersedes: the "third review round" label of the entry above.
+
+### 2026-10-15: review round 8
+- What changed: the lock pause test now pauses at the lock step itself, right
+  after the lock exists, by wrapping whatever the script uses to take it
+  (`flock`, `perl`, or `mkdir` of a lock directory), holds the pause for 5.5s
+  and checks that three contenders still skip; a second test pauses after the
+  lock file is open but before the lock is taken. The install-hooks tests gain
+  one that records the temp file's mode at the moment its contents are written,
+  via a preload that wraps the fs write calls. The scope sentence in the
+  branch-history note above is corrected to the actual 8 files.
+- Why: the earlier pause test gated the first `jq` call, which runs after the
+  old directory lock had already published its owner id, so it could not
+  expose the interval that mattered; the earlier permission test only checked
+  the final mode.
+- Verified to fail on the earlier code: the new pause test fails against the
+  directory-lock script from `ec5a0ee` (a contender after 5.5s reclaims the
+  owner-less lock and rebuilds); the permission-observer test fails against the
+  `ec5a0ee` `install-hooks.mjs` (`path-after-write 644`).
+- Not possible: pausing exactly at the `open` of the lock file; there is no
+  hook there without changing the script. The nearest points are covered: after
+  open and before locking, and right after locking.
+- Supersedes: the "paused while holding the lock" description in the test plan.
