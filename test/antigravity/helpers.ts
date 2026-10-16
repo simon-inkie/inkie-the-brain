@@ -115,7 +115,9 @@ export async function setupAgyWorkspace(): Promise<AgyTestEnv> {
 }
 
 export async function teardownAgyWorkspace(env: AgyTestEnv): Promise<void> {
-  await rm(env.testDir, { recursive: true, force: true });
+  // The Stop hook spawns build-context.sh detached, so it can still be
+  // writing into the silo when teardown starts (ENOTEMPTY on macOS); retry.
+  await rm(env.testDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 /** Read a recorded event fixture and point it at this test workspace. */

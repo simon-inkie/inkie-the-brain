@@ -15,7 +15,8 @@
 # is preserved byte-for-byte. This is a permanent runtime concurrency contract,
 # not a one-shot dev guarantee.
 #
-# Atomic against concurrent invocations of itself via flock on memory/.live-block.lock.
+# Atomic against concurrent invocations of itself via an flock(2) lock on
+# memory/.live-block.lock (taken with flock(1) or perl; see the lock block).
 #
 # Called automatically by observe.sh and reflect.sh; can also be invoked manually.
 
@@ -75,15 +76,71 @@ COMPRESS_ERA="$SCRIPT_DIR/compress-era.sh"
 ANCHOR_START="<!-- IO_LIVE_START -->"
 ANCHOR_END="<!-- IO_LIVE_END -->"
 
-# --- flock self-atomicity (skipped in --emit mode: pure read, no contention) ---
+# --- Single-instance lock (skipped in --emit mode: pure read, no contention) ---
+#
+# One protocol on every host: an advisory flock(2) lock on the open file
+# description behind fd 9 (memory/.live-block.lock). The kernel releases it
+# when the last process holding that descriptor exits, so there is no pid
+# file, no stale-lock reclaim and nothing a live owner can lose. The lock is
+# taken with flock(1) when the PATH has it, otherwise with perl (shipped with
+# stock macOS); both call flock(2) on the same fd, so a run that found one tool
+# and a run that found the other exclude each other. If neither tool is
+# available, or flock itself fails for a reason other than contention, the run
+# proceeds WITHOUT a lock and says so on stderr (skipping would be the silent
+# no-op this fixes). Unlocked, only the MEMORY.md splice is atomic: the temp
+# file is created next to its target so mv is a rename, but concurrent runs can
+# still race on live-state.json (read-modify-write) and era-summary.md.
+# Exit status of an acquire attempt: 0 = acquired, 1 = held by another run,
+# anything else = lock tooling unavailable or failed (perl: 3 = flock error).
+
+acquire_lock() {
+    local rc=0
+    if command -v flock >/dev/null 2>&1; then
+        flock -n 9 || rc=$?
+    elif command -v perl >/dev/null 2>&1; then
+        perl -e 'use Fcntl qw(:flock); open(my $fh, "<&=", 9) or exit 2;
+                 exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : ($!{EWOULDBLOCK} ? 1 : 3))' || rc=$?
+    else
+        rc=127
+    fi
+    return "$rc"
+}
 
 if [ "$EMIT_MODE" != "true" ]; then
-    exec 9>"$LOCK_FILE"
-    if ! flock -n 9; then
-        echo "build-context.sh: another instance is running, skipping" >&2
-        exit 0
+    if { exec 9>"$LOCK_FILE"; } 2>/dev/null; then
+        lock_rc=0
+        acquire_lock || lock_rc=$?
+        if [ "$lock_rc" -eq 1 ]; then
+            echo "build-context.sh: another instance is running, skipping" >&2
+            exit 0
+        elif [ "$lock_rc" -ne 0 ]; then
+            echo "build-context.sh: no usable file lock (flock or perl), continuing without one" >&2
+        fi
+    else
+        echo "build-context.sh: cannot open $LOCK_FILE, continuing without a lock" >&2
     fi
 fi
+
+# Detect the stat flavour once. GNU stat takes -c %Y; BSD stat takes -f %m.
+# Probing per call would be unsafe: on GNU stat -f means filesystem status and
+# %m is read as a file name. file_mtime prints the mtime in epoch seconds, or
+# fails with no output; callers default a missing mtime to 0 (see mtime_of).
+if stat -c %Y . >/dev/null 2>&1; then
+    file_mtime() { stat -c %Y "$1" 2>/dev/null; }
+elif stat -f %m . >/dev/null 2>&1; then
+    file_mtime() { stat -f %m "$1" 2>/dev/null; }
+else
+    file_mtime() { return 1; }
+fi
+
+# mtime of $1 as an integer, 0 if it cannot be read (e.g. the file vanished
+# between listing and stat), so numeric comparisons never see an empty string.
+mtime_of() {
+    local mt
+    mt="$(file_mtime "$1" || true)"
+    case "$mt" in ''|*[!0-9]*) mt=0 ;; esac
+    echo "$mt"
+}
 
 # --- Sanity checks (--emit needs no MEMORY.md: it never splices) ---
 
@@ -115,13 +172,14 @@ write_state() {
     local value="$2"
     local is_string="${3:-false}"
     local tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$LIVE_STATE_FILE.XXXXXX")" # same directory, so mv is a rename
+    # A failed write or rename must not leave the temp file beside the state.
     if [ "$is_string" = "true" ]; then
-        jq --arg v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp"
+        jq --arg v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp" || { rm -f "$tmp"; return 1; }
     else
-        jq --argjson v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp"
+        jq --argjson v "$value" ".$key = \$v" "$LIVE_STATE_FILE" > "$tmp" || { rm -f "$tmp"; return 1; }
     fi
-    mv "$tmp" "$LIVE_STATE_FILE"
+    mv "$tmp" "$LIVE_STATE_FILE" || { rm -f "$tmp"; return 1; }
 }
 
 HOT_K=$(read_state hotReflectionCount)
@@ -145,7 +203,7 @@ REFL_COUNT=${#REFLECTIONS[@]}
 ELDER=()
 HOT=()
 if [ "$REFL_COUNT" -le "$HOT_K" ]; then
-    HOT=("${REFLECTIONS[@]}")
+    HOT=(${REFLECTIONS[@]+"${REFLECTIONS[@]}"})
 else
     ELDER_COUNT=$((REFL_COUNT - HOT_K))
     ELDER=("${REFLECTIONS[@]:0:ELDER_COUNT}")
@@ -168,7 +226,7 @@ ERA_NEEDS_REBUILD=false
 ERA_REBUILD_REASON=""
 
 if [ "$ELDER_COUNT" -gt 0 ]; then
-    LATEST_ELDER_FILE="${ELDER[-1]}"
+    LATEST_ELDER_FILE="${ELDER[$((ELDER_COUNT - 1))]}"
     LATEST_ELDER_BASENAME="$(basename "$LATEST_ELDER_FILE" .md)"
     LATEST_ELDER_DATE="${LATEST_ELDER_BASENAME:0:10}"
 
@@ -195,9 +253,9 @@ if [ "$ERA_NEEDS_REBUILD" = "true" ] && [ "$EMIT_MODE" != "true" ]; then
     # passed as the "current" via compress-era.sh.
     NEW_ABSORB=()
     if [ -z "$ERA_COVERAGE" ] || [ "$ERA_COVERAGE" = "null" ] || [ ! -s "$ERA_FILE" ]; then
-        NEW_ABSORB=("${ELDER[@]}")
+        NEW_ABSORB=(${ELDER[@]+"${ELDER[@]}"})
     else
-        for f in "${ELDER[@]}"; do
+        for f in ${ELDER[@]+"${ELDER[@]}"}; do
             BN="$(basename "$f" .md)"
             DT="${BN:0:10}"
             if [[ "$DT" > "$ERA_COVERAGE" ]]; then
@@ -229,7 +287,7 @@ fi
 
 LATEST_REFL_MTIME=0
 if [ "$REFL_COUNT" -gt 0 ]; then
-    LATEST_REFL_MTIME=$(stat -c %Y "${REFLECTIONS[-1]}")
+    LATEST_REFL_MTIME=$(mtime_of "${REFLECTIONS[$((REFL_COUNT - 1))]}")
 fi
 
 UNPROCESSED_FILES=()
@@ -238,8 +296,8 @@ while IFS= read -r f; do
 done < <(find "$OBS_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
 
 UNPROCESSED_NEW=()
-for f in "${UNPROCESSED_FILES[@]}"; do
-    F_MTIME=$(stat -c %Y "$f")
+for f in ${UNPROCESSED_FILES[@]+"${UNPROCESSED_FILES[@]}"}; do
+    F_MTIME=$(mtime_of "$f")
     if [ "$F_MTIME" -gt "$LATEST_REFL_MTIME" ]; then
         UNPROCESSED_NEW+=("$f")
     fi
@@ -325,7 +383,7 @@ assemble_block() {
         # Step 1: build the CAPPED unprocessed-obs block (priority 2) so we can
         # measure it and reserve budget before adding reflections.
         if [ "$REFL_COUNT" -gt 0 ]; then
-            LATEST_REFL_BN="$(basename "${REFLECTIONS[-1]}" .md)"
+            LATEST_REFL_BN="$(basename "${REFLECTIONS[$((REFL_COUNT - 1))]}" .md)"
         else
             LATEST_REFL_BN="(none)"
         fi
@@ -361,7 +419,7 @@ assemble_block() {
                     break
                 fi
                 if [ "$obs_entry_len" -le "$obs_remaining" ]; then
-                    obs_kept=("$obs_entry" "${obs_kept[@]}")
+                    obs_kept=("$obs_entry" ${obs_kept[@]+"${obs_kept[@]}"})
                     obs_used=$(( obs_used + obs_entry_len ))
                 else
                     # Entry overflows the sub-budget. Keep its head if there is
@@ -371,7 +429,7 @@ assemble_block() {
                         obs_head_keep=$(( obs_remaining - 120 ))
                         [ "$obs_head_keep" -lt 0 ] && obs_head_keep=0
                         obs_trunc="#### ${OBS_BN}"$'\n'$'\n'"${obs_body:0:$obs_head_keep}"$'\n'"> (observation truncated; full text via recall)"$'\n'$'\n'
-                        obs_kept=("$obs_trunc" "${obs_kept[@]}")
+                        obs_kept=("$obs_trunc" ${obs_kept[@]+"${obs_kept[@]}"})
                         obs_used=$(( obs_used + ${#obs_trunc} ))
                     fi
                     obs_dropped=1
@@ -379,7 +437,7 @@ assemble_block() {
                 fi
             done
             local e
-            for e in "${obs_kept[@]}"; do
+            for e in ${obs_kept[@]+"${obs_kept[@]}"}; do
                 obs_block+="$e"
             done
             if [ "$obs_dropped" -eq 1 ]; then
@@ -457,7 +515,7 @@ assemble_block() {
             block+="_No reflections yet._"$'\n'
             block+=$'\n'
         else
-            for f in "${HOT[@]}"; do
+            for f in ${HOT[@]+"${HOT[@]}"}; do
                 BN="$(basename "$f" .md)"
                 block+="## Reflection (${BN})"$'\n'
                 block+=$'\n'
@@ -468,7 +526,7 @@ assemble_block() {
 
         # Zone 3 - Unprocessed Observations
         if [ "$REFL_COUNT" -gt 0 ]; then
-            LATEST_REFL_BN="$(basename "${REFLECTIONS[-1]}" .md)"
+            LATEST_REFL_BN="$(basename "${REFLECTIONS[$((REFL_COUNT - 1))]}" .md)"
         else
             LATEST_REFL_BN="(none)"
         fi
@@ -477,7 +535,7 @@ assemble_block() {
         if [ "$UNPROCESSED_COUNT" -eq 0 ]; then
             block+="_No new observations since the last reflection._"$'\n'
         else
-            for f in "${UNPROCESSED_NEW[@]}"; do
+            for f in ${UNPROCESSED_NEW[@]+"${UNPROCESSED_NEW[@]}"}; do
                 OBS_BN="$(basename "$f" .md)"
                 block+="#### ${OBS_BN}"$'\n'
                 block+=$'\n'
@@ -559,7 +617,7 @@ while true; do
         # Regenerate era at higher level using ALL elders
         if [ "$ELDER_COUNT" -gt 0 ]; then
             ABSORB_DIR="$(mktemp -d)"
-            for f in "${ELDER[@]}"; do
+            for f in ${ELDER[@]+"${ELDER[@]}"}; do
                 ln -s "$f" "$ABSORB_DIR/$(basename "$f")"
             done
             # Wipe era so compress-era treats this as a fresh build at the new level
@@ -580,7 +638,7 @@ while true; do
         # Re-slice
         if [ "$REFL_COUNT" -le "$HOT_K" ]; then
             ELDER=()
-            HOT=("${REFLECTIONS[@]}")
+            HOT=(${REFLECTIONS[@]+"${REFLECTIONS[@]}"})
         else
             ELDER_COUNT=$((REFL_COUNT - HOT_K))
             ELDER=("${REFLECTIONS[@]:0:ELDER_COUNT}")
@@ -590,7 +648,7 @@ while true; do
         HOT_COUNT=${#HOT[@]}
         # Rebuild era at max level absorbing the new (larger) elder set
         ABSORB_DIR="$(mktemp -d)"
-        for f in "${ELDER[@]}"; do
+        for f in ${ELDER[@]+"${ELDER[@]}"}; do
             ln -s "$f" "$ABSORB_DIR/$(basename "$f")"
         done
         : > "$ERA_FILE"
@@ -611,7 +669,7 @@ splice_into_memory() {
     local memory_file="$1"
     local block="$2"
     local tmp block_file
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$memory_file.XXXXXX")" # same directory, so mv is a rename
     block_file="$(mktemp)"
     printf '%s\n' "$block" > "$block_file"
 
@@ -639,9 +697,9 @@ splice_into_memory() {
             }
             if (!in_block) { print }
         }
-    ' "$memory_file" > "$tmp"
+    ' "$memory_file" > "$tmp" || { rm -f "$tmp" "$block_file"; return 1; }
 
-    mv "$tmp" "$memory_file"
+    mv "$tmp" "$memory_file" || { rm -f "$tmp" "$block_file"; return 1; }
     rm -f "$block_file"
 }
 

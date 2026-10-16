@@ -151,6 +151,98 @@ describe("install-hooks.mjs", () => {
     expect(JSON.parse(readFileSync(real, "utf-8")).theme).toBe("dark");
   });
 
+  it("keeps a 0600 settings file 0600 under umask 022 and leaves no temp file", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ secret: "s3cret" }));
+    chmodSync(settings, 0o600);
+    const r = spawnSync(
+      "sh",
+      ["-c", `umask 022; exec node "$0" --settings "$1" --dist "$2"`,
+        join(repoRoot, "scripts", "install-hooks.mjs"), settings, dist],
+      { encoding: "utf-8" },
+    );
+    expect(r.status).toBe(0);
+    expect(statSync(settings).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${settings}.the-brain.tmp`)).toBe(false);
+  });
+
+  it("the temp file is never group/world readable while its contents are written", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ secret: "s3cret" }));
+    chmodSync(settings, 0o600);
+
+    // A preload that wraps the fs write calls and records the temp file's mode
+    // at the moment contents are written (fd writes: just before the write;
+    // path writes: right after, the earliest point they can be observed).
+    const preload = join(dir, "observe-writes.cjs");
+    const log = join(dir, "modes.log");
+    writeFileSync(
+      preload,
+      `const fs = require("fs");
+const mod = require("module");
+const log = process.env.MODE_LOG;
+const rec = (tag, mode) => fs.appendFileSync(log, tag + " " + (mode & 0o777).toString(8) + "\\n");
+const wf = fs.writeFileSync;
+fs.writeFileSync = function (target, ...rest) {
+  if (typeof target === "number") {
+    rec("fd-before-write", fs.fstatSync(target).mode);
+    return wf.call(this, target, ...rest);
+  }
+  const r = wf.call(this, target, ...rest);
+  if (typeof target === "string" && target.endsWith(".the-brain.tmp")) {
+    rec("path-after-write", fs.statSync(target).mode);
+  }
+  return r;
+};
+const ws = fs.writeSync;
+fs.writeSync = function (fd, ...rest) {
+  rec("fd-before-write", fs.fstatSync(fd).mode);
+  return ws.call(this, fd, ...rest);
+};
+mod.syncBuiltinESMExports();
+`,
+    );
+    const r = spawnSync(
+      "sh",
+      ["-c", `umask 022; exec node --require "$0" "$1" --settings "$2" --dist "$3"`,
+        preload, join(repoRoot, "scripts", "install-hooks.mjs"), settings, dist],
+      { encoding: "utf-8", env: { ...process.env, MODE_LOG: log } },
+    );
+    expect(r.status).toBe(0);
+
+    const seen = readFileSync(log, "utf-8").trim().split("\n");
+    // The observer must have seen the content write, or the test proves nothing.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const line of seen) {
+      const mode = parseInt(line.split(" ")[1], 8);
+      expect(mode & 0o077, `${line}`).toBe(0);
+    }
+  });
+
+  it("replaces a loose-mode temp file left by a crashed run instead of reusing it", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ secret: "s3cret" }));
+    chmodSync(settings, 0o600);
+    const stale = `${settings}.the-brain.tmp`;
+    writeFileSync(stale, "stale");
+    chmodSync(stale, 0o666);
+    expect(run().status).toBe(0);
+    expect(existsSync(stale)).toBe(false);
+    expect(statSync(settings).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(settings, "utf-8")).secret).toBe("s3cret");
+  });
+
+  it("does not write through a symlink planted at the temp path", () => {
+    mkdirSync(dirname(settings), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ a: 1 }));
+    const victim = join(dir, "victim.txt");
+    writeFileSync(victim, "untouched");
+    symlinkSync(victim, `${settings}.the-brain.tmp`);
+    expect(run().status).toBe(0);
+    expect(readFileSync(victim, "utf-8")).toBe("untouched");
+    expect(JSON.parse(readFileSync(settings, "utf-8")).hooks.Stop).toHaveLength(1);
+  });
+
   it("exits 3 on invalid JSON and leaves the file byte-identical", () => {
     mkdirSync(dirname(settings), { recursive: true });
     writeFileSync(settings, "{ not json");

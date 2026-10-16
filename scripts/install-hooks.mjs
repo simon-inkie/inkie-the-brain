@@ -17,8 +17,8 @@
  * as <file>.the-brain.bak. An existing backup is never overwritten.
  */
 import {
-  existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync,
-  realpathSync, statSync, chmodSync,
+  existsSync, mkdirSync, readFileSync, renameSync, copyFileSync,
+  realpathSync, statSync, openSync, fchmodSync, writeFileSync, closeSync, unlinkSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -93,9 +93,35 @@ if (!changed) {
   const backup = `${settingsPath}.the-brain.bak`;
   if (existed && original.trim() !== "" && !existsSync(backup)) copyFileSync(settingsPath, backup);
   const tmp = `${settingsPath}.the-brain.tmp`;
-  writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
-  // Keep the original permissions (a 600 settings file must not become 644).
-  if (existed) chmodSync(tmp, statSync(settingsPath).mode & 0o777);
-  renameSync(tmp, settingsPath);
+  // Create the temp file exclusively with mode 0600 BEFORE any content is
+  // written, so the contents are never readable by other users (a 600 settings
+  // file must not pass through 644 under umask 022). The final permissions are
+  // applied after the write, still before the rename. A temp file left by a
+  // crashed run is removed first; "wx" refuses to reuse or follow anything
+  // that appears at that path in the meantime.
+  const finalMode = existed
+    ? statSync(settingsPath).mode & 0o777
+    : 0o666 & ~process.umask();
+  try {
+    unlinkSync(tmp);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  const fd = openSync(tmp, "wx", 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(settings, null, 2) + "\n"); // loops on short writes
+    fchmodSync(fd, finalMode);
+  } catch (e) {
+    closeSync(fd);
+    try { unlinkSync(tmp); } catch { /* best effort */ }
+    throw e;
+  }
+  closeSync(fd);
+  try {
+    renameSync(tmp, settingsPath);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* best effort */ }
+    throw e;
+  }
   console.log(`install-hooks: wrote ${settingsPath}`);
 }
