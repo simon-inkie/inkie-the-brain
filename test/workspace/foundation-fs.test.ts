@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fixture, errorCode, type Fixture } from './fixtures.js';
 import { openWorkspaceRead, readWorkspaceTextSync, writeWorkspaceDerived } from '../../core/workspace-read.js';
 import { assertWorkspacePlatform } from '../../core/workspace-fs.js';
-describe('held filesystem operations',()=>{
+describe.runIf(process.platform==='linux')('held filesystem operations',()=>{
  let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>{vi.restoreAllMocks();syncBuiltinESMExports();f.clean();});
  it('reads through an allowed canonical symlink and an async retained descriptor',async()=>{
    const note=f.put('note.md','fictional 🐦');symlinkSync('note.md',join(f.memory,'alias.md'));const ws=f.ws();

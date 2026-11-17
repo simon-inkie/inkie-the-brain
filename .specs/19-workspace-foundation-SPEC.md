@@ -29,11 +29,11 @@ approval or complete installed workspace acceptance.
 
 | Check | Result |
 | --- | --- |
-| `pnpm install --frozen-lockfile` | Passed using an isolated dependency store; package and lockfile unchanged |
+| `pnpm install --frozen-lockfile` | Previous isolated-store pass reused; not rerun for this correction, available dependencies and package/lockfile unchanged |
 | `pnpm build` | Passed on corrected source, including the normal CORE guard |
 | `pnpm typecheck` | Passed on corrected source |
-| `pnpm test` | 537 passed across 43 files, including 73 new tests across 8 files |
-| Guard sensitivity | Three deliberate guard removals failed at the intended assertions; exact source restored |
+| `pnpm test` | 547 passed and 1 platform skip across 43 files, including 83 foundation/packaging passes and 1 platform skip across 8 files |
+| Guard sensitivity | Seven parent or guard-removal controls failed at the intended assertions; exact source restored |
 | Extracted packs | Actual plugin, hooks and Claude Code helpers passed with source and network access blocked |
 | Installer compatibility | Actual isolated dry run and repeated settings merge passed; unrelated hooks retained |
 | `pnpm check:leaks:self-test` | Passed |
@@ -80,3 +80,38 @@ Confirmed the final source and packaged artifact bindings against the builder
 receipts. The executable source is unchanged from the passing local gates.
 Only this status wording changed after handoff. Clean committed-tree checks,
 independent review and required platform CI remain outstanding.
+
+### 2026-11-17: Bounded source corrections started
+
+The reviewed candidate is clean. Correcting Linux-only test qualification while
+retaining required macOS CI, decoded authored MEMORY output bounds and invalid
+blank present memory pointers. Independent source adjudication also confirms
+that missing local era metadata can mix authored metadata with newer local
+coverage. Restore one coherent authored generation in read and refresh views;
+preserve valid local compression pairs. Focused regressions, intentional
+negative controls and final gates are pending. Changes remain unstaged for
+maintainer review; no installed or live operations are included.
+
+### 2026-11-17: Bounded corrections verified
+
+Corrected all four accepted findings: platform-qualified Linux workspace tests,
+bounded decoded authored MEMORY output, refused blank present memory pointers,
+and restored coherent authored era summary/metadata/state after local metadata
+loss. Valid local compression pairs and reduced hot counts remain intact.
+Read-only recovery, refresh return, reread, persisted files and source provenance
+are pinned together. Legacy and import/no-I/O cases retain platform-independent
+coverage. Required CI is unchanged.
+
+The corrected build and single authoritative typecheck pass. The full Linux
+suite passes 547 tests across 43 files, with one native unsupported-platform
+case skipped on Linux. Seven negative controls fail at the intended assertions
+and their source bytes are restored. Synthetic darwin qualification passes
+seven portable cases and skips 77 Linux workspace cases; this is not native
+macOS evidence. Two private synthetic harness attempts failed during binary
+selection, then the corrected harness passed. Original logs remain retained.
+Leak self-test, full scan and licence checks pass; the full scan is repeated
+after this final public receipt update. Native macOS and Docker remain not run
+for the reasons above. No new dependencies or schema changes were made. All
+48 public additions and existing manifest/lock, providers and installed wiring
+are preserved. Corrected bytes remain unstaged for independent maintainer
+review, committed gates and exact recheck; no operational acceptance is claimed.

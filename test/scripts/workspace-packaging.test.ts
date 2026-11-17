@@ -22,7 +22,7 @@ for(const key of ['readFile','open']){const old=fs.promises[key];fs.promises[key
 for(const name of ['http','https']){const api=require('node:'+name);api.get=api.request=()=>{throw Error('network forbidden');};}require('node:net').connect=()=>{throw Error('network forbidden');};globalThis.fetch=()=>{throw Error('network forbidden');};syncBuiltinESMExports();`);
    return {...f.env,PATH:bin,BRAIN_FORBIDDEN_SOURCE:repo.replace(/\/$/,''),NODE_OPTIONS:'--require='+guard};
  };
- for(const name of ['plugin','hooks','claude-code'])it(`executes the actual ${name} helper with source, sibling packs and package loaders unavailable`,()=>{
+ for(const name of ['plugin','hooks','claude-code'])it.runIf(process.platform==='linux')(`executes the actual ${name} helper with source, sibling packs and package loaders unavailable`,()=>{
    const pack=extract(name);f.put('reflections/2026-05-01.md','packaged fictional note');f.putPath(join(f.root,'agents','finch','CORE.md'),'Packaged Finch');const env=childEnv();
    expect(existsSync(join(pack,'templates','RECALL-INSTRUCTIONS.md'))).toBe(true);
    const render=spawnSync('/bin/bash',[join(pack,'memory-tools','workspace-render.sh'),f.memory,'--cached'],{env,cwd:f.base,encoding:'utf8'});expect(render.status,render.stderr).toBe(0);expect(render.stdout).toContain('packaged fictional note');
@@ -30,7 +30,7 @@ for(const name of ['http','https']){const api=require('node:'+name);api.get=api.
    expect(existsSync(join(f.root,'device'))).toBe(false);expect(readdirSync(f.base)).not.toContain('node_modules');
    unlinkSync(join(pack,'workspace-foundation.js'));const missing=spawnSync('/bin/bash',[join(pack,'memory-tools','workspace-render.sh'),f.memory],{env,cwd:f.base,encoding:'utf8'});expect(missing.status).toBe(2);expect(missing.stdout).toBe('');expect(missing.stderr).toContain('WORKSPACE_HELPER_MISSING');
  });
- it('actual paths shell output is safe to eval and agrees with TypeScript path identity',()=>{
+ it.runIf(process.platform==='linux')('actual paths shell output is safe to eval and agrees with TypeScript path identity',()=>{
    const pack=extract('claude-code');const env=childEnv();const helper=join(pack,'hooks','workspace-paths.sh');
    const parsed=spawnSync('/bin/bash',['-c','assignments="$(/bin/bash "$1")" || exit $?; eval "$assignments"; printf "%s\\n%s\\n%s\\n" "$WORKSPACE_ID" "$WORKSPACE_ROOT_REAL" "$WORKSPACE_BRAIN_INDEX"','fixture',helper],{env,cwd:f.base,encoding:'utf8'});
    expect(parsed.status,parsed.stderr).toBe(0);expect(parsed.stdout.split('\n').slice(0,3)).toEqual([f.manifest.workspaceId,f.ws().root,f.ws().indexDir]);

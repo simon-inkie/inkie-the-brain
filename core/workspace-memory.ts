@@ -19,7 +19,11 @@ export function resolveWorkspaceMemoryDir(ws:Workspace,projectDir:string,env:Nod
   }
   const pointer=join(project,'.the-brain','memory_root');
   resolveWorkspaceRead(ws,pointer);
-  if (entryExists(pointer)) { const raw=readWorkspaceTextSync(ws,pointer,4096).trim(); if (raw) return confine(raw); }
+  if (entryExists(pointer)) {
+    const raw=readWorkspaceTextSync(ws,pointer,4096).trim();
+    if (!raw) fail('WORKSPACE_MEMORY_POINTER_INVALID','present memory pointer must be nonblank');
+    return confine(raw);
+  }
   if (env.BRAIN_MEMORY_DIR?.trim()) return confine(env.BRAIN_MEMORY_DIR.trim());
   return confine(join(ws.paths.silos,basename(project),'memory'));
 }
@@ -50,7 +54,11 @@ export async function renderWorkspaceMemory(ws:Workspace,memoryDir:string,opts:{
   const era=view.eraSummary??'';
   if (!notes.reflections.length && !notes.observations.length && !era) {
     const authored=join(dirname(memory),'MEMORY.md'); resolveWorkspaceWrite(ws,authored,{within:ws.paths.silos});
-    if (entryExists(authored)) return readHeldSync(authored,p=>resolveWorkspaceWrite(ws,p,{within:ws.paths.silos}),limit).toString('utf8');
+    if (entryExists(authored)) {
+      const text=readHeldSync(authored,p=>resolveWorkspaceWrite(ws,p,{within:ws.paths.silos}),limit).toString('utf8');
+      if (Buffer.byteLength(text)>limit) fail('WORKSPACE_OUTPUT_LIMIT','context exceeds output byte limit');
+      return text;
+    }
   }
   const hot=Number(view.state.hotReflectionCount); const recent=hot?notes.reflections.slice(-hot):[];
   const latest=Math.max(0,...notes.reflections.map(n=>n.mtimeMs));

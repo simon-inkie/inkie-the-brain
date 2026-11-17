@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fixture, errorCode, localPath, type Fixture } from './fixtures.js';
 import { resolveWorkspaceMemoryDir, renderWorkspaceMemory } from '../../core/workspace-memory.js';
 import { refreshDerivedMemoryState, readDerivedMemoryState } from '../../core/workspace-derived.js';
-describe('workspace memory tiers and relocation',()=>{
+describe.runIf(process.platform==='linux')('workspace memory tiers and relocation',()=>{
  let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>f.clean());
  it('explicit identity wins over a project pointer and unrelated HOME',()=>{
    const project=join(f.root,'projects','project');f.putPath(join(project,'.the-brain','memory_root'),'silos/other/memory');
@@ -27,6 +27,21 @@ describe('workspace memory tiers and relocation',()=>{
  it('auto-silo creates nothing and invalid names fall through with a warning',()=>{
    const project=join(f.root,'projects','project');const ws=f.ws();expect(resolveWorkspaceMemoryDir(ws,project,{AGENT_NAME:'../invalid'})).toBe(join(ws.paths.silos,'project','memory'));
    expect(errorCode(()=>resolveWorkspaceMemoryDir(ws,project,{BRAIN_MEMORY_DIR:ws.paths.silos}))).toBe('WRITE_OUTSIDE_WORKSPACE');
+ });
+ it.each(['',' \t\n'])('present blank pointer %j refuses valid lower tiers but preserves earlier priority',raw=>{
+   f.put('note.md','valid lower-tier memory');const project=join(f.root,'projects','project');const pointer=f.putPath(join(project,'.the-brain','memory_root'),raw);const ws=f.ws();
+   const before=readFileSync(pointer);const lower={BRAIN_MEMORY_DIR:'silos/finch/memory'};
+   expect(errorCode(()=>resolveWorkspaceMemoryDir(ws,project,lower))).toBe('WORKSPACE_MEMORY_POINTER_INVALID');
+   expect(errorCode(()=>resolveWorkspaceMemoryDir(ws,project,{}))).toBe('WORKSPACE_MEMORY_POINTER_INVALID');
+   expect(readFileSync(pointer)).toEqual(before);
+   expect(resolveWorkspaceMemoryDir(ws,project,{...lower,AGENT_NAME:'finch'})).toBe(f.memory);
+   symlinkSync(f.memory,join(project,'memory'));expect(resolveWorkspaceMemoryDir(ws,project,lower)).toBe(f.memory);
+ });
+ it('truly absent pointer preserves environment and basename fallback without writes',()=>{
+   f.put('note.md','valid fallback');const project=join(f.root,'projects','project');mkdirSync(project,{recursive:true});const ws=f.ws();
+   expect(resolveWorkspaceMemoryDir(ws,project,{BRAIN_MEMORY_DIR:'silos/finch/memory'})).toBe(f.memory);
+   expect(resolveWorkspaceMemoryDir(ws,project,{})).toBe(join(ws.paths.silos,'project','memory'));
+   expect(readFileSync(join(f.memory,'note.md'),'utf8')).toBe('valid fallback');
  });
  it('undeclared and dangling pointer entries refuse rather than fall through',()=>{
    const project=join(f.base,'external');f.putPath(join(project,'.the-brain','memory_root'),'silos/finch/memory');expect(errorCode(()=>resolveWorkspaceMemoryDir(f.ws(),project,{}))).toBe('EXTERNAL_READ_NOT_DECLARED');

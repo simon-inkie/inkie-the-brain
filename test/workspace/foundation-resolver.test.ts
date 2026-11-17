@@ -4,12 +4,8 @@ import { join } from 'node:path';
 import { fixture, errorCode, type Fixture } from './fixtures.js';
 import { loadWorkspace, resolveWorkspaceRead, resolveWorkspaceWrite, externalReadPath, isWorkspaceMode } from '../../core/workspace.js';
 import * as fs from 'node:fs';
-describe('explicit version-one resolution',()=>{
+describe.runIf(process.platform==='linux')('explicit version-one resolution',()=>{
  let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>{vi.restoreAllMocks();f.clean();});
- it('blank selection reads nothing and ignores inherited mode',()=>{
-   expect(isWorkspaceMode({WORKSPACE_ROOT:' \t\n',WORKSPACE_MODE:'workspace'})).toBe(false);
-   expect(loadWorkspace({WORKSPACE_ROOT:' \t\n',WORKSPACE_MODE:'workspace'})).toBeNull();
- });
  it('resolves absent roots without creating them, preserving extensions',()=>{
    Object.assign(f.manifest,{extension:{label:'fictional'}});f.save();
    const before=readdirSync(f.root);const ws=f.ws();expect(ws.workspaceId).toBe(f.manifest.workspaceId);
@@ -47,3 +43,8 @@ describe('explicit version-one resolution',()=>{
  });
 });
 function fixtureWithoutExternal(ws:ReturnType<Fixture['ws']>){return {...ws,externalReadOnlyEnv:[]};}
+
+ it('blank selection reads nothing and ignores inherited mode',()=>{
+   expect(isWorkspaceMode({WORKSPACE_ROOT:' \t\n',WORKSPACE_MODE:'workspace'})).toBe(false);
+   expect(loadWorkspace({WORKSPACE_ROOT:' \t\n',WORKSPACE_MODE:'workspace'})).toBeNull();
+ });

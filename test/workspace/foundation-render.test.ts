@@ -1,14 +1,25 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { symlinkSync, mkdirSync, readdirSync, readFileSync, utimesSync, unlinkSync } from 'node:fs';
+import { symlinkSync, mkdirSync, readdirSync, readFileSync, utimesSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture, type Fixture } from './fixtures.js';
 import { renderWorkspaceMemory } from '../../core/workspace-memory.js';
 import { readWorkspacePersona } from '../../core/workspace-persona.js';
-describe('bounded read-only memory and persona',()=>{
+describe.runIf(process.platform==='linux')('bounded read-only memory and persona',()=>{
  let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>f.clean());
  it('new silo returns authored MEMORY only without changing any bytes',async()=>{
    f.putPath(join(f.root,'silos','finch','MEMORY.md'),'# Finch\n🐦 authored only\n');const ws=f.ws();const before=readdirSync(join(f.root,'silos','finch'));
    expect(await renderWorkspaceMemory(ws,f.memory,{cached:true})).toBe('# Finch\n🐦 authored only\n');expect(readdirSync(join(f.root,'silos','finch'))).toEqual(before);expect(readdirSync(f.root)).not.toContain('device');
+ });
+ it.each([1,2,10])('decoded malformed MEMORY fallback respects a %s-byte output bound',async limit=>{
+   const authored=f.putPath(join(f.root,'silos','finch','MEMORY.md'),'valid');const ws=f.ws();
+   writeFileSync(authored,Buffer.alloc(limit,0xff));const before=readFileSync(authored);
+   await expect(renderWorkspaceMemory(ws,f.memory,{maxOutputBytes:limit})).rejects.toMatchObject({code:'WORKSPACE_OUTPUT_LIMIT'});
+   expect(readFileSync(authored)).toEqual(before);expect(readdirSync(f.root)).not.toContain('device');
+ });
+ it('valid Unicode MEMORY fallback returns exact bytes at the bound',async()=>{
+   const text='🐦é';const authored=f.putPath(join(f.root,'silos','finch','MEMORY.md'),text);const before=readFileSync(authored);const ws=f.ws();
+   expect(await renderWorkspaceMemory(ws,f.memory,{maxOutputBytes:Buffer.byteLength(text)})).toBe(text);
+   expect(readFileSync(authored)).toEqual(before);
  });
  it('era, hot reflections and later observations keep the public zone order',async()=>{
    f.put('live-state.json','{"hotReflectionCount":1}');f.put('era-summary.md','ancient era');f.put('reflections/2026-05-01.md','older reflection');f.put('reflections/2026-05-02.md','recent reflection');f.put('observations/2026-05-03.md','later observation');

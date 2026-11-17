@@ -85,7 +85,9 @@ Existing shell empty-variable behaviour will be reconciled at caller integration
 existing project memory, a confined project pointer, explicit memory override or
 basename silo. Overrides must remain strictly within `silos`; no home fallback
 or tilde expansion applies. Invalid names warn and try later tiers. An invalid
-present pointer or escaping override refuses instead of falling through.
+present pointer, including an empty or whitespace-only pointer, or escaping
+override refuses instead of falling through. Blank present pointers report
+`WORKSPACE_MEMORY_POINTER_INVALID`; absent pointers retain lower-tier fallback.
 
 `derivedMemoryPaths(memoryDir, leaf, ws)` preserves both requested and resolved
 entries and creates nothing. The allowed leaves are `live-state.json`,
@@ -95,7 +97,10 @@ permission. Without an explicit workspace it returns the legacy memory leaf.
 
 `readDerivedMemoryState` computes authored configuration plus disposable counters.
 `refreshDerivedMemoryState` explicitly persists that view and matching era source
-hashes. Observer thresholds and timing configuration remain authored. An unchanged
+hashes. If a local era artifact needed for the authored pair is missing, reads
+and refreshes restore the authored summary, metadata, level and coverage date
+together. Complete local compression pairs retain their local coverage and
+reduced hot count when authored inputs are unchanged. Observer thresholds and timing configuration remain authored. An unchanged
 configured hot target preserves local reductions within authored limits. Era
 coverage can seed from validated authored metadata after disposable state loss.
 SHA-256 source hashes distinguish absent, empty and changed era inputs. Present

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fixture, localPath, errorCode, type Fixture } from './fixtures.js';
 import { readDerivedMemoryState, refreshDerivedMemoryState } from '../../core/workspace-derived.js';
 import { derivedMemoryPaths } from '../../core/derived-state.js';
-describe('authored truth and disposable state',()=>{
+describe.runIf(process.platform==='linux')('authored truth and disposable state',()=>{
  let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>{vi.restoreAllMocks();syncBuiltinESMExports();f.clean();});
  const seed=(f:Fixture)=>{f.put('live-state.json','{"hotReflectionCount":4,"softBudgetChars":10000,"hardBudgetChars":20000}');f.put('era-summary.md','authored era');f.put('era-summary.meta.json','{"level":2,"coverageLatestReflectionDate":"2026-05-04"}');};
  it('read-only lost local state seeds validated era coverage without creating local files',()=>{
@@ -22,6 +22,29 @@ describe('authored truth and disposable state',()=>{
    f.putPath(localPath(ws,f.memory,'era-summary.md'),'local compressed era');f.putPath(localPath(ws,f.memory,'era-summary.meta.json'),'{"level":3,"coverageLatestReflectionDate":"2026-05-06"}');
    const view=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');expect(view.state.hotReflectionCount).toBe(2);expect(view.state.eraCompressionLevel).toBe(3);expect(view.eraSummary).toBe('local compressed era');
    f.put('live-state.json','{"hotReflectionCount":5}');expect(readDerivedMemoryState(ws,f.memory,'live-state.json').state.hotReflectionCount).toBe(5);
+ });
+ it.each([false,true])('era generation stays coherent with local metadata missing=%s',async missing=>{
+   seed(f);const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');
+   const names=['live-state.json','era-summary.md','era-summary.meta.json'] as const;
+   const authoredBytes=names.map(name=>readFileSync(join(f.memory,name)));
+   f.putPath(localPath(ws,f.memory,'live-state.json'),' {"hotReflectionCount":2,"configuredHotReflectionCount":4,"eraCompressionLevel":3,"eraCoverageThroughReflectionDate":"2026-05-10"}');
+   f.putPath(localPath(ws,f.memory,'era-summary.md'),'newer local compressed era');f.putPath(localPath(ws,f.memory,'era-summary.meta.json'),'{"level":3,"coverageLatestReflectionDate":"2026-05-10"}');
+   if(missing)unlinkSync(localPath(ws,f.memory,'era-summary.meta.json'));
+   const tracked=['live-state.json','era-summary.md','era-authored-provenance.json'];const before=tracked.map(name=>readFileSync(localPath(ws,f.memory,name)));
+   const expectedSummary=missing?'authored era':'newer local compressed era';const level=missing?2:3;const date=missing?'2026-05-04':'2026-05-10';
+   const coherent=(view:ReturnType<typeof readDerivedMemoryState>)=>{
+     expect(view.eraSummary).toBe(expectedSummary);expect(view.eraMeta).toMatchObject({level,coverageLatestReflectionDate:date});
+     expect(view.state).toMatchObject({hotReflectionCount:2,eraCompressionLevel:level,eraCoverageThroughReflectionDate:date});
+   };
+   coherent(readDerivedMemoryState(ws,f.memory,'live-state.json'));
+   expect(tracked.map(name=>readFileSync(localPath(ws,f.memory,name)))).toEqual(before);
+   expect(fs.existsSync(localPath(ws,f.memory,'era-summary.meta.json'))).toBe(!missing);
+   const refreshed=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');coherent(refreshed);const reread=readDerivedMemoryState(ws,f.memory,'live-state.json');coherent(reread);expect(reread).toEqual(refreshed);
+   expect(readFileSync(localPath(ws,f.memory,'era-summary.md'),'utf8')).toBe(expectedSummary);
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'era-summary.meta.json'),'utf8'))).toMatchObject({level,coverageLatestReflectionDate:date});
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'live-state.json'),'utf8'))).toEqual(refreshed.state);
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'),'utf8'))).toEqual(refreshed.sourceHashes);
+   expect(names.map(name=>readFileSync(join(f.memory,name)))).toEqual(authoredBytes);
  });
  it('older local states adopt the authored target without erasing their reduction',()=>{
    seed(f);const ws=f.ws();f.putPath(localPath(ws,f.memory,'live-state.json'),'{"hotReflectionCount":2}');expect(readDerivedMemoryState(ws,f.memory,'live-state.json').state.hotReflectionCount).toBe(2);
@@ -59,6 +82,10 @@ describe('authored truth and disposable state',()=>{
    expect(readDerivedMemoryState(ws,f.memory,'live-state.json').eraChanged).toBe(true);
  });
  it('path lookup grants no write and unknown leaves refuse',()=>{
-   const ws=f.ws();expect(derivedMemoryPaths(f.memory,'live-state.json',ws).requested).toBe(localPath(ws,f.memory,'live-state.json'));expect(fs.existsSync(ws.paths.local)).toBe(false);expect(errorCode(()=>derivedMemoryPaths(f.memory,'arbitrary.txt',ws))).toBe('WORKSPACE_STATE_INVALID');expect(derivedMemoryPaths('/fixture/memory','live-state.json').resolved).toBe('/fixture/memory/live-state.json');
+   const ws=f.ws();expect(derivedMemoryPaths(f.memory,'live-state.json',ws).requested).toBe(localPath(ws,f.memory,'live-state.json'));expect(fs.existsSync(ws.paths.local)).toBe(false);expect(errorCode(()=>derivedMemoryPaths(f.memory,'arbitrary.txt',ws))).toBe('WORKSPACE_STATE_INVALID');
  });
+});
+
+it('legacy derived path lookup is platform independent',()=>{
+ expect(derivedMemoryPaths('/fixture/memory','live-state.json').resolved).toBe('/fixture/memory/live-state.json');
 });

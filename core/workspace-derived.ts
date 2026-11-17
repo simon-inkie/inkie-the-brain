@@ -51,7 +51,10 @@ function eraInputs(ws:Workspace,memory:string) {
   // An absent provenance with leftover local era is a stale generation, never
   // proof of current coverage. Present malformed provenance is always an error.
   const changed=previous===null || ERA_NAMES.some(n=>previous[n]!==hashes[n]);
-  return {bytes,hashes,changed,meta,localEra,localMeta};
+  // An incomplete local pair must restore the entire authored generation,
+  // including its state coverage. Use the same decision for read and refresh.
+  const restore=changed || (localEra===null && bytes['era-summary.md']!==null) || (localMeta===null && meta!==null);
+  return {bytes,hashes,changed,restore,meta,localEra,localMeta};
 }
 export function readDerivedMemoryState(ws:Workspace,memoryDir:string,kind:StateKind):DerivedMemoryView {
   if (kind!=='live-state.json'&&kind!=='observer-state.json') fail('WORKSPACE_STATE_INVALID','unsupported state kind');
@@ -75,14 +78,14 @@ export function readDerivedMemoryState(ws:Workspace,memoryDir:string,kind:StateK
     if (current && (current.configuredHotReflectionCount??configuredHot)!==configuredHot) effective=configuredHot;
     effective=Math.max(Number(config.minHotReflectionCount),Math.min(Number(configuredHot),Number(effective)));
     state={eraCompressionLevel:0,eraCoverageThroughReflectionDate:null,lastRebuildAt:null,lastBlockCharCount:0,...current,...config,configuredHotReflectionCount:configuredHot,hotReflectionCount:effective};
-    if (era.changed || current===null || era.localEra===null) {
+    if (era.restore || current===null || era.localEra===null) {
       state.eraCompressionLevel=era.bytes['era-summary.md']!==null?era.meta?.level??0:0;
       state.eraCoverageThroughReflectionDate=era.bytes['era-summary.md']!==null?era.meta?.coverageLatestReflectionDate??null:null;
     }
   }
   validateState(state);
-  return {state,eraSummary:(era.changed?era.bytes['era-summary.md']:era.localEra??era.bytes['era-summary.md'])?.toString('utf8')??null,
-    eraMeta:era.changed?era.meta:era.localMeta??era.meta,sourceHashes:era.hashes,eraChanged:era.changed,warnings:era.changed&&current!==null?['Authored era changed; stale derived era ignored']:[]};
+  return {state,eraSummary:(era.restore?era.bytes['era-summary.md']:era.localEra??era.bytes['era-summary.md'])?.toString('utf8')??null,
+    eraMeta:era.restore?era.meta:era.localMeta??era.meta,sourceHashes:era.hashes,eraChanged:era.changed,warnings:era.changed&&current!==null?['Authored era changed; stale derived era ignored']:[]};
 }
 /** Refresh only disposable files. Source hashes are rechecked before publishing
  * provenance. A partial refresh has no matching receipt and cannot be promoted.
@@ -93,7 +96,7 @@ export async function refreshDerivedMemoryState(ws:Workspace,memoryDir:string,ki
   const path=(name:string)=>derivedMemoryPaths(memory,name,ws).requested;
   // Remove the old receipt first, so a failed replacement never certifies mixed
   // era generations. Each unlink/write remains confined and identity checked.
-  const replaceEra=snapshot.changed || (snapshot.localEra===null && snapshot.bytes['era-summary.md']!==null) || (snapshot.localMeta===null && snapshot.meta!==null);
+  const replaceEra=snapshot.restore;
   if (replaceEra) {
     await removeWorkspaceDerived(ws,path('era-authored-provenance.json'));
     for (const name of ERA_NAMES) {
