@@ -274,6 +274,26 @@ writeFileSync(
 );
 log(`wrote ${ccDist}/package.json`);
 
+// Standalone workspace foundation: Node builtins only, adjacent in every pack.
+// Existing installed hooks do not call it; invocation is explicit and read-only.
+mkdirSync(join(pluginDist, "memory-tools"), { recursive: true });
+cpSync(join(ROOT, "adapters/openclaw/hooks/memory-tools/workspace-render.sh"),
+  join(pluginDist, "memory-tools/workspace-render.sh"));
+if (existsSync(templatesSrc)) {
+  cpSync(templatesSrc, join(pluginDist, "templates"), { recursive: true });
+}
+for (const pack of [pluginDist, hooksDist, ccDist]) {
+  await build({
+    entryPoints: [join(ROOT, "cli/workspace-foundation.ts")],
+    outfile: join(pack, "workspace-foundation.js"),
+    bundle: true, platform: "node", format: "esm", target: "node22",
+    logLevel: "warning",
+  });
+  chmodSync(join(pack, "memory-tools/workspace-render.sh"), 0o755);
+}
+chmodSync(join(ccDist, "hooks/workspace-paths.sh"), 0o755);
+log("standalone workspace helpers bundled in each pack");
+
 // ===========================================================================
 // CORE GUARD
 // ===========================================================================

@@ -1,0 +1,64 @@
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import fs, { readFileSync, symlinkSync, mkdirSync, unlinkSync, utimesSync, statSync, readdirSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fixture, localPath, errorCode, type Fixture } from './fixtures.js';
+import { readDerivedMemoryState, refreshDerivedMemoryState } from '../../core/workspace-derived.js';
+import { derivedMemoryPaths } from '../../core/derived-state.js';
+describe('authored truth and disposable state',()=>{
+ let f:Fixture;beforeEach(()=>f=fixture());afterEach(()=>{vi.restoreAllMocks();syncBuiltinESMExports();f.clean();});
+ const seed=(f:Fixture)=>{f.put('live-state.json','{"hotReflectionCount":4,"softBudgetChars":10000,"hardBudgetChars":20000}');f.put('era-summary.md','authored era');f.put('era-summary.meta.json','{"level":2,"coverageLatestReflectionDate":"2026-05-04"}');};
+ it('read-only lost local state seeds validated era coverage without creating local files',()=>{
+   seed(f);const ws=f.ws();const view=readDerivedMemoryState(ws,f.memory,'live-state.json');expect(view.state).toMatchObject({eraCompressionLevel:2,eraCoverageThroughReflectionDate:'2026-05-04',hotReflectionCount:4});expect(fs.existsSync(ws.paths.local)).toBe(false);
+ });
+ it('refresh preserves all authored bytes, writes matching provenance and no progress credit',async()=>{
+   seed(f);const ws=f.ws();const before=readFileSync(join(f.memory,'live-state.json'));const view=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');
+   expect(view.eraChanged).toBe(false);expect(readFileSync(join(f.memory,'live-state.json'))).toEqual(before);expect(view.state.lastRebuildAt).toBeNull();
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'),'utf8'))).toEqual(view.sourceHashes);
+ });
+ it('unchanged authored targets retain reduced hot counts and local compressed era',async()=>{
+   seed(f);const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');
+   f.putPath(localPath(ws,f.memory,'live-state.json'),'{"hotReflectionCount":2,"configuredHotReflectionCount":4,"eraCompressionLevel":3,"eraCoverageThroughReflectionDate":"2026-05-06"}');
+   f.putPath(localPath(ws,f.memory,'era-summary.md'),'local compressed era');f.putPath(localPath(ws,f.memory,'era-summary.meta.json'),'{"level":3,"coverageLatestReflectionDate":"2026-05-06"}');
+   const view=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');expect(view.state.hotReflectionCount).toBe(2);expect(view.state.eraCompressionLevel).toBe(3);expect(view.eraSummary).toBe('local compressed era');
+   f.put('live-state.json','{"hotReflectionCount":5}');expect(readDerivedMemoryState(ws,f.memory,'live-state.json').state.hotReflectionCount).toBe(5);
+ });
+ it('older local states adopt the authored target without erasing their reduction',()=>{
+   seed(f);const ws=f.ws();f.putPath(localPath(ws,f.memory,'live-state.json'),'{"hotReflectionCount":2}');expect(readDerivedMemoryState(ws,f.memory,'live-state.json').state.hotReflectionCount).toBe(2);
+ });
+ it('same-mtime authored edits invalidate era by hash; read-only does not repair',async()=>{
+   seed(f);const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');const eraPath=join(f.memory,'era-summary.md');const time=statSync(eraPath);f.put('era-summary.md','edited era');utimesSync(eraPath,time.atime,time.mtime);
+   const before=readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'));const view=readDerivedMemoryState(ws,f.memory,'live-state.json');expect(view.eraChanged).toBe(true);expect(view.eraSummary).toBe('edited era');expect(view.warnings).toHaveLength(1);expect(readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'))).toEqual(before);
+   expect((await refreshDerivedMemoryState(ws,f.memory,'live-state.json')).eraChanged).toBe(false);
+ });
+ it('empty and missing authored era have different hashes and deletion removes only derived copies',async()=>{
+   seed(f);const ws=f.ws();const original=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');f.put('era-summary.md','');const empty=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');expect(empty.sourceHashes['era-summary.md']).not.toBe(original.sourceHashes['era-summary.md']);
+   unlinkSync(join(f.memory,'era-summary.md'));const missing=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');expect(missing.sourceHashes['era-summary.md']).toBeNull();expect(fs.existsSync(localPath(ws,f.memory,'era-summary.md'))).toBe(false);expect(missing.state.eraCoverageThroughReflectionDate).toBeNull();expect(fs.existsSync(join(f.memory,'era-summary.meta.json'))).toBe(true);
+ });
+ it.each(['null','[]','{','{"hotReflectionCount":-1}'])('present invalid local state %s is never first use',(data)=>{
+   seed(f);const ws=f.ws();f.putPath(localPath(ws,f.memory,'live-state.json'),data);expect(errorCode(()=>readDerivedMemoryState(ws,f.memory,'live-state.json'))).toBe('WORKSPACE_STATE_INVALID');
+ });
+ it('malformed provenance refuses before any mutation',async()=>{
+   seed(f);const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');const path=localPath(ws,f.memory,'era-authored-provenance.json');f.putPath(path,'{"era-summary.md":"invalid"}');
+   const before=readFileSync(localPath(ws,f.memory,'live-state.json'));await expect(refreshDerivedMemoryState(ws,f.memory,'live-state.json')).rejects.toMatchObject({code:'WORKSPACE_STATE_INVALID'});expect(readFileSync(localPath(ws,f.memory,'live-state.json'))).toEqual(before);expect(readFileSync(path,'utf8')).toBe('{"era-summary.md":"invalid"}');
+ });
+ it('dangling local state/provenance and escaping authored era fail before first-use defaults',()=>{
+   seed(f);const ws=f.ws();const path=localPath(ws,f.memory,'live-state.json');mkdirSync(dirname(path),{recursive:true});symlinkSync('missing',path);
+   expect(errorCode(()=>readDerivedMemoryState(ws,f.memory,'live-state.json'))).toBe('PATH_DANGLING');unlinkSync(path);symlinkSync('missing',localPath(ws,f.memory,'era-authored-provenance.json'));expect(errorCode(()=>readDerivedMemoryState(ws,f.memory,'live-state.json'))).toBe('PATH_DANGLING');
+   unlinkSync(localPath(ws,f.memory,'era-authored-provenance.json'));unlinkSync(join(f.memory,'era-summary.md'));const outside=f.putPath(join(f.root,'brain','outside.md'),'not memory');symlinkSync(outside,join(f.memory,'era-summary.md'));expect(errorCode(()=>readDerivedMemoryState(ws,f.memory,'live-state.json'))).toBe('WRITE_OUTSIDE_WORKSPACE');
+ });
+ it.each(['{"level":4}','{"level":true}','{"coverageLatestReflectionDate":"2026-02-30"}'])('invalid era metadata %s refuses',data=>{seed(f);f.put('era-summary.meta.json',data);expect(errorCode(()=>readDerivedMemoryState(f.ws(),f.memory,'live-state.json'))).toBe('WORKSPACE_STATE_INVALID');});
+ it('observer authored configuration overrides disposable counters and removed config disappears',()=>{
+   f.put('observer-state.json','{"reflectionThreshold":10}');f.put('observations/2026-05-06.md','🐦 bird');const ws=f.ws();let view=readDerivedMemoryState(ws,f.memory,'observer-state.json');expect(view.state).toMatchObject({reflectionThreshold:10,unprocessedObservationCount:1,unprocessedObservationChars:6});
+   f.putPath(localPath(ws,f.memory,'observer-state.json'),'{"reflectionThreshold":3,"oldMaxAgeMs":8,"unprocessedObservationCount":2}');view=readDerivedMemoryState(ws,f.memory,'observer-state.json');expect(view.state.reflectionThreshold).toBe(10);expect(view.state.unprocessedObservationCount).toBe(2);expect(view.state.oldMaxAgeMs).toBeUndefined();
+ });
+ it('failed partial refresh leaves no matching provenance and authored bytes untouched',async()=>{
+   seed(f);const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');f.put('era-summary.md','new authored era');const oldRename=fs.renameSync;
+   vi.spyOn(fs,'renameSync').mockImplementation(((a:fs.PathLike,b:fs.PathLike)=>{if(String(b).endsWith('/era-summary.meta.json'))throw Object.assign(new Error('failed rename'),{code:'EIO'});oldRename(a,b);}) as typeof fs.renameSync);syncBuiltinESMExports();
+   await expect(refreshDerivedMemoryState(ws,f.memory,'live-state.json')).rejects.toMatchObject({code:'EIO'});expect(fs.existsSync(localPath(ws,f.memory,'era-authored-provenance.json'))).toBe(false);expect(readFileSync(join(f.memory,'era-summary.md'),'utf8')).toBe('new authored era');
+   expect(readDerivedMemoryState(ws,f.memory,'live-state.json').eraChanged).toBe(true);
+ });
+ it('path lookup grants no write and unknown leaves refuse',()=>{
+   const ws=f.ws();expect(derivedMemoryPaths(f.memory,'live-state.json',ws).requested).toBe(localPath(ws,f.memory,'live-state.json'));expect(fs.existsSync(ws.paths.local)).toBe(false);expect(errorCode(()=>derivedMemoryPaths(f.memory,'arbitrary.txt',ws))).toBe('WORKSPACE_STATE_INVALID');expect(derivedMemoryPaths('/fixture/memory','live-state.json').resolved).toBe('/fixture/memory/live-state.json');
+ });
+});
