@@ -70,6 +70,16 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
+// Intentional copyright attribution is permitted only as this complete notice.
+// Keep the holder split, just like the denylist; this file is scanned too.
+const COPYRIGHT_NOTICE = ["Copyright (c) 2026 ", "Si", "mon Di", "xon"].join("");
+
+/** @param {string} relative @param {string} label @param {string} lineText */
+function isCopyrightNotice(relative, label, lineText) {
+  return relative === "LICENSE" && label === "principal-first-name" &&
+    lineText === COPYRIGHT_NOTICE;
+}
+
 /**
  * @param {{
  *   label: string,
@@ -424,18 +434,19 @@ function isExempt(relativePath, label) {
 const BINARY_SNIFF_BYTES = 8000;
 
 /** @param {string} filePath @returns {{ file: string, line: number, label: string, why: string }[]} */
-function scanFile(filePath) {
+function scanFile(filePath, repoRoot = REPO_ROOT) {
   const buffer = fs.readFileSync(filePath);
   if (buffer.subarray(0, BINARY_SNIFF_BYTES).includes(0)) {
     return []; // binary file (NUL in the first 8000 bytes, matching git's own heuristic)
   }
-  const relative = path.relative(REPO_ROOT, filePath);
+  const relative = path.relative(repoRoot, filePath);
   const findings = [];
   const lines = buffer.toString("utf8").split("\n");
   for (const [index, lineText] of lines.entries()) {
     for (const { label, why, re, where } of RULES) {
       if (where === "filename") continue;
       if (isExempt(relative, label)) continue;
+      if (isCopyrightNotice(relative, label, lineText)) continue;
       if (re.test(lineText)) {
         findings.push({ file: filePath, line: index + 1, label, why });
       }
@@ -522,6 +533,46 @@ function selfTest() {
 
     // --- positive: content rules ---
     fs.writeFileSync(file, contentRules.map((r) => r.sample).join("\n") + "\n", "utf8");
+    // Exact notice accommodation, pinned through the production scanning path.
+    const noticeName = ["Si", "mon"].join("");
+    const noticeCases = [
+      ["LICENSE", COPYRIGHT_NOTICE, false, "exact root notice"],
+      ["other.txt", COPYRIGHT_NOTICE, true, "notice in another file"],
+      ["nested/LICENSE", COPYRIGHT_NOTICE, true, "nested licence"],
+      ["LICENSE", `${COPYRIGHT_NOTICE} ${noticeName}`, true, "added name on notice line"],
+      ["LICENSE", `${COPYRIGHT_NOTICE} extra`, true, "added text on notice line"],
+      ["LICENSE", `// ${COPYRIGHT_NOTICE}`, true, "commented notice"],
+      ["LICENSE", `${COPYRIGHT_NOTICE}\n${noticeName}`, true, "bare name elsewhere in licence"],
+      ["LICENSE", COPYRIGHT_NOTICE.replace("2026", "2025"), true, "another year"],
+      ["LICENSE", COPYRIGHT_NOTICE.toLowerCase(), true, "changed case"],
+      ["LICENSE", `${COPYRIGHT_NOTICE}\r`, true, "changed line ending"],
+    ];
+    for (const [relative, text, denied, reason] of noticeCases) {
+      const sample = path.join(dir, relative);
+      fs.mkdirSync(path.dirname(sample), { recursive: true });
+      fs.writeFileSync(sample, `${text}\n`);
+      const hits = scanFile(sample, dir);
+      if (hits.some((f) => f.label === "principal-first-name") !== denied) {
+        console.error(`leak-gate self-test: copyright notice failed: ${reason}`);
+        process.exit(1);
+      }
+    }
+    for (const label of ["private-key-block", "absolute-home-path", "second-principal-first-name"]) {
+      const sampleRule = RULES.find((r) => r.label === label);
+      if (!sampleRule) throw new Error(`Missing privacy rule ${label}`);
+      for (const separator of ["\n", " "]) {
+        const text = `${COPYRIGHT_NOTICE}${separator}${sampleRule.sample}\n`;
+        const sample = path.join(dir, "LICENSE");
+        fs.writeFileSync(sample, text);
+        const hits = scanFile(sample, dir);
+        if (!hits.some((f) => f.label === label)) {
+          console.error(`leak-gate self-test: copyright notice suppressed ${label}`);
+          process.exit(1);
+        }
+      }
+    }
+    console.log("leak-gate self-test: exact root copyright notice allowed; other contexts and privacy rules denied");
+
     const findings = scanFile(file);
     const missed = contentRules.filter((r) => !findings.some((f) => f.label === r.label));
     if (missed.length > 0) {
