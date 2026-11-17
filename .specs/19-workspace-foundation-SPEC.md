@@ -31,9 +31,9 @@ approval or complete installed workspace acceptance.
 | --- | --- |
 | `pnpm install --frozen-lockfile` | Previous isolated-store pass reused; not rerun for this correction, available dependencies and package/lockfile unchanged |
 | `pnpm build` | Passed on corrected source, including the normal CORE guard |
-| `pnpm typecheck` | Passed on corrected source |
-| `pnpm test` | 547 passed and 1 platform skip across 43 files, including 83 foundation/packaging passes and 1 platform skip across 8 files |
-| Guard sensitivity | Seven parent or guard-removal controls failed at the intended assertions; exact source restored |
+| `pnpm typecheck` | Fresh cross-state correction passed with one authoritative compiler run after the other compiler completed |
+| `pnpm test` | Fresh cross-state correction: 550 passed and 1 platform skip across 43 files, including 86 foundation/packaging passes and 1 platform skip across 8 files |
+| Guard sensitivity | Prior seven controls retained; fresh exact-parent cross-state control fails both recovery cases at live level/date assertions, with the unchanged local pair passing; exact source restored |
 | Extracted packs | Actual plugin, hooks and Claude Code helpers passed with source and network access blocked |
 | Installer compatibility | Actual isolated dry run and repeated settings merge passed; unrelated hooks retained |
 | `pnpm check:leaks:self-test` | Passed |
@@ -115,3 +115,41 @@ for the reasons above. No new dependencies or schema changes were made. All
 48 public additions and existing manifest/lock, providers and installed wiring
 are preserved. Corrected bytes remain unstaged for independent maintainer
 review, committed gates and exact recheck; no operational acceptance is claimed.
+
+### 2026-11-17: Cross-state era correction started
+
+The prior four corrections are retained. Independent review confirms that an
+observer-first refresh can restore the shared authored era pair and provenance
+while leaving newer live level and coverage fields stale. Every live view will
+select level and coverage from the validated era generation used for its summary
+and metadata. Hot reductions and other counters remain preserved. Pin sequential
+observer refresh, live read, live refresh and reread for metadata loss, authored
+changes and an unchanged complete local pair. Read-only checks, exact-parent
+sensitivity and fresh final gates are pending. Changes remain unstaged.
+
+### 2026-11-17: Cross-state correction verified except compiler gate
+
+The source correction and three sequential observer-first regressions pass.
+Fresh full tests pass 550 cases across 43 files with one platform skip. Normal
+build, leak self-test/full scan, licence and scope checks pass. Exact-parent
+source fails both recovery cases at the intended live level/date assertions;
+the unchanged local pair passes and corrected source bytes are restored. The
+negative log checker initially expected an untruncated source line; the retained
+failure log is separately qualified using its exact assertion locations.
+Synthetic darwin passes seven portable cases and skips 80 Linux cases, without
+claiming native validation. The single authoritative compiler gate is waiting
+for serialised compiler availability. Native macOS and Docker remain not run.
+
+### 2026-11-17: Cross-state compiler and final receipt completed
+
+The single authoritative typecheck passes after the other compiler completed.
+All fresh executable gates bind to unchanged production, tests and packaged
+artifacts. Only this public SPEC receipt changed after executable gates; the
+full leak scan is repeated over its final bytes. Scope verification preserves
+all 48 public additions, manifest/lock, required CI, existing legacy callers and
+prior correction bytes outside this four-file delta. Source and artifact maps,
+negative-control restoration bindings, commands, exits and original logs are
+retained for independent recheck. Native macOS and Docker remain not run for
+the reasons above. Corrected bytes remain unstaged for root freeze, independent
+review and fresh committed gates. No clean-final, maintainer, installed or live
+acceptance is claimed.

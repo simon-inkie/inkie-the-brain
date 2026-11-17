@@ -63,6 +63,8 @@ export function readDerivedMemoryState(ws:Workspace,memoryDir:string,kind:StateK
   const truth=truthBytes===null?{}:object(truthBytes,'authored state'); const current=currentBytes===null?null:object(currentBytes,'local state');
   validateState(truth); if (current) validateState(current);
   const era=eraInputs(ws,memory); let state:State;
+  const selectedEra=era.restore?era.bytes['era-summary.md']:era.localEra??era.bytes['era-summary.md'];
+  const selectedMeta=era.restore?era.meta:era.localMeta??era.meta;
   if (kind==='observer-state.json') {
     const config=Object.fromEntries(Object.entries(truth).filter(([k])=>/(?:Threshold|MaxAgeMs|MinGapMs)$/.test(k)));
     const notes=readMemoryNotes(ws,memory); const latest=Math.max(0,...notes.reflections.map(n=>n.mtimeMs)); const pending=notes.observations.filter(n=>n.mtimeMs>latest);
@@ -78,14 +80,15 @@ export function readDerivedMemoryState(ws:Workspace,memoryDir:string,kind:StateK
     if (current && (current.configuredHotReflectionCount??configuredHot)!==configuredHot) effective=configuredHot;
     effective=Math.max(Number(config.minHotReflectionCount),Math.min(Number(configuredHot),Number(effective)));
     state={eraCompressionLevel:0,eraCoverageThroughReflectionDate:null,lastRebuildAt:null,lastBlockCharCount:0,...current,...config,configuredHotReflectionCount:configuredHot,hotReflectionCount:effective};
-    if (era.restore || current===null || era.localEra===null) {
-      state.eraCompressionLevel=era.bytes['era-summary.md']!==null?era.meta?.level??0:0;
-      state.eraCoverageThroughReflectionDate=era.bytes['era-summary.md']!==null?era.meta?.coverageLatestReflectionDate??null:null;
-    }
+    // Both state kinds share the era pair and provenance. An observer refresh
+    // can replace that pair before live state is persisted, so derive coverage
+    // from the selected validated generation on every live read.
+    state.eraCompressionLevel=selectedEra!==null?selectedMeta?.level??0:0;
+    state.eraCoverageThroughReflectionDate=selectedEra!==null?selectedMeta?.coverageLatestReflectionDate??null:null;
   }
   validateState(state);
-  return {state,eraSummary:(era.restore?era.bytes['era-summary.md']:era.localEra??era.bytes['era-summary.md'])?.toString('utf8')??null,
-    eraMeta:era.restore?era.meta:era.localMeta??era.meta,sourceHashes:era.hashes,eraChanged:era.changed,warnings:era.changed&&current!==null?['Authored era changed; stale derived era ignored']:[]};
+  return {state,eraSummary:selectedEra?.toString('utf8')??null,
+    eraMeta:selectedMeta,sourceHashes:era.hashes,eraChanged:era.changed,warnings:era.changed&&current!==null?['Authored era changed; stale derived era ignored']:[]};
 }
 /** Refresh only disposable files. Source hashes are rechecked before publishing
  * provenance. A partial refresh has no matching receipt and cannot be promoted.

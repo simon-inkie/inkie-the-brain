@@ -46,6 +46,53 @@ describe.runIf(process.platform==='linux')('authored truth and disposable state'
    expect(JSON.parse(readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'),'utf8'))).toEqual(refreshed.sourceHashes);
    expect(names.map(name=>readFileSync(join(f.memory,name)))).toEqual(authoredBytes);
  });
+ it.each(['metadata-loss','authored-change','unchanged'] as const)('observer-first %s selects coherent live era without erasing counters',async cause=>{
+   seed(f);f.put('observer-state.json','{"reflectionThreshold":10}');
+   const ws=f.ws();await refreshDerivedMemoryState(ws,f.memory,'live-state.json');
+   const retained={hotReflectionCount:2,configuredHotReflectionCount:4,lastRebuildAt:'2026-05-10T12:00:00Z',lastBlockCharCount:1234,rebuildCount:7,customCount:9};
+   f.putPath(localPath(ws,f.memory,'live-state.json'),JSON.stringify({...retained,eraCompressionLevel:3,eraCoverageThroughReflectionDate:'2026-05-10'}));
+   f.putPath(localPath(ws,f.memory,'observer-state.json'),'{"reflectionThreshold":3,"unprocessedObservationCount":6,"unprocessedObservationChars":42,"lastReflectionAt":"2026-05-10T12:00:00Z"}');
+   f.putPath(localPath(ws,f.memory,'era-summary.md'),'newer local compressed era');
+   f.putPath(localPath(ws,f.memory,'era-summary.meta.json'),'{"level":3,"coverageLatestReflectionDate":"2026-05-10"}');
+   if(cause==='metadata-loss')unlinkSync(localPath(ws,f.memory,'era-summary.meta.json'));
+   if(cause==='authored-change'){
+     f.put('era-summary.md','changed authored era');
+     f.put('era-summary.meta.json','{"level":1,"coverageLatestReflectionDate":"2026-05-07"}');
+   }
+   const names=['live-state.json','observer-state.json','era-summary.md','era-summary.meta.json'] as const;
+   const authoredBytes=names.map(name=>readFileSync(join(f.memory,name)));
+   const liveBefore=readFileSync(localPath(ws,f.memory,'live-state.json'));
+   const provenanceBefore=readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'));
+   const observer=await refreshDerivedMemoryState(ws,f.memory,'observer-state.json');
+   expect(observer.state).toMatchObject({reflectionThreshold:10,unprocessedObservationCount:6,unprocessedObservationChars:42,lastReflectionAt:'2026-05-10T12:00:00Z'});
+   expect(readFileSync(localPath(ws,f.memory,'live-state.json'))).toEqual(liveBefore);
+   const summary=cause==='unchanged'?'newer local compressed era':cause==='authored-change'?'changed authored era':'authored era';
+   const level=cause==='unchanged'?3:cause==='authored-change'?1:2;
+   const date=cause==='unchanged'?'2026-05-10':cause==='authored-change'?'2026-05-07':'2026-05-04';
+   expect(observer.eraSummary).toBe(summary);expect(observer.eraMeta).toMatchObject({level,coverageLatestReflectionDate:date});
+   const provenance=readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'));
+   expect(JSON.parse(provenance.toString())).toEqual(observer.sourceHashes);
+   expect(provenance.equals(provenanceBefore)).toBe(cause!=='authored-change');
+   const snapshot=()=>readdirSync(f.root,{recursive:true}).map(String).sort().map(name=>{
+     const path=join(f.root,name);const stat=statSync(path);
+     return [name,stat.mode,stat.mtimeMs,stat.isFile()?readFileSync(path):null];
+   });
+   const before=snapshot();
+   const coherent=(view:ReturnType<typeof readDerivedMemoryState>)=>{
+     expect(view.eraChanged).toBe(false);expect(view.eraSummary).toBe(summary);
+     expect(view.eraMeta).toMatchObject({level,coverageLatestReflectionDate:date});
+     expect(view.state).toMatchObject({...retained,eraCompressionLevel:level,eraCoverageThroughReflectionDate:date});
+   };
+   coherent(readDerivedMemoryState(ws,f.memory,'live-state.json'));
+   expect(snapshot()).toEqual(before);
+   const refreshed=await refreshDerivedMemoryState(ws,f.memory,'live-state.json');coherent(refreshed);
+   const reread=readDerivedMemoryState(ws,f.memory,'live-state.json');coherent(reread);expect(reread).toEqual(refreshed);
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'live-state.json'),'utf8'))).toEqual(refreshed.state);
+   expect(readFileSync(localPath(ws,f.memory,'era-summary.md'),'utf8')).toBe(summary);
+   expect(JSON.parse(readFileSync(localPath(ws,f.memory,'era-summary.meta.json'),'utf8'))).toMatchObject({level,coverageLatestReflectionDate:date});
+   expect(readFileSync(localPath(ws,f.memory,'era-authored-provenance.json'))).toEqual(provenance);
+   expect(names.map(name=>readFileSync(join(f.memory,name)))).toEqual(authoredBytes);
+ });
  it('older local states adopt the authored target without erasing their reduction',()=>{
    seed(f);const ws=f.ws();f.putPath(localPath(ws,f.memory,'live-state.json'),'{"hotReflectionCount":2}');expect(readDerivedMemoryState(ws,f.memory,'live-state.json').state.hotReflectionCount).toBe(2);
  });

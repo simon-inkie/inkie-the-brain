@@ -99,8 +99,13 @@ permission. Without an explicit workspace it returns the legacy memory leaf.
 `refreshDerivedMemoryState` explicitly persists that view and matching era source
 hashes. If a local era artifact needed for the authored pair is missing, reads
 and refreshes restore the authored summary, metadata, level and coverage date
-together. Complete local compression pairs retain their local coverage and
-reduced hot count when authored inputs are unchanged. Observer thresholds and timing configuration remain authored. An unchanged
+together. Each live view derives level and coverage from its selected validated
+era metadata, including after an observer-first refresh restores the shared
+pair and provenance. Live refresh persists that coherent view; read alone does
+not repair stored state. Complete local compression pairs retain their local
+coverage and reduced hot count when authored inputs are unchanged. Other live
+counters remain preserved. Observer thresholds and timing configuration remain
+authored. An unchanged
 configured hot target preserves local reductions within authored limits. Era
 coverage can seed from validated authored metadata after disposable state loss.
 SHA-256 source hashes distinguish absent, empty and changed era inputs. Present
